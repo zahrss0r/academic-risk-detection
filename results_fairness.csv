@@ -1,0 +1,7 @@
+Attribute,Group,Students,Recall,Precision
+gender,F,1739,0.7713,0.5962
+gender,M,2043,0.795,0.6964
+age_band,0-35,2642,0.7884,0.6618
+age_band,35-55,1117,0.7707,0.6145
+disability,False,3418,0.7787,0.6463
+disability,True,364,0.8293,0.6667

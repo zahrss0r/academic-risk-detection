@@ -1,0 +1,4 @@
+Dataset,Rows_available,Sample_rows,Students,Indicators,At_risk_share,CV_recall,CV_spread,Recall,Precision,F1,AUC,Test_rows,Missed,False_alarms
+Open University,25305,1000,920,9,0.386,0.6928,0.0471,0.75,0.7377,0.7438,0.8488,304,30,32
+UKZN,32508,1001,438,5,0.1379,0.6942,0.1112,0.54,0.675,0.6,0.9201,301,23,13
+UPV Valencia,26858,1001,219,9,0.2228,0.3018,0.0479,0.3485,0.3151,0.3309,0.623,292,43,50
