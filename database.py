@@ -53,13 +53,17 @@ def create_tables():
     connection = connect()
     cursor = connection.cursor()
 
-    # One row per student. The things that do not change during a term.
+    # One row per student the system has ever read, and only what a
+    # cohort file actually carries about them. An earlier version of this
+    # table also had a programme and a level, which no cohort file holds
+    # and which nothing in the system ever filled, so every notice pointed
+    # at a student row that did not exist. A table is either filled by the
+    # system that owns it or it does not belong in it.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS student (
             student_id        TEXT PRIMARY KEY,
-            program           TEXT,
-            level             INTEGER,
-            credits_this_term INTEGER
+            credits_this_term INTEGER,
+            first_seen        TEXT
         )
     """)
 
@@ -152,17 +156,21 @@ def create_tables():
     connection.close()
 
 
-def save_student(student_id, program, level, credits_this_term):
-    # Adds the student if new, updates the details if already there.
-    # "INSERT OR REPLACE" does both, because student_id is the primary key.
+def save_student(student_id, credits_this_term, first_seen):
+    # Adds the student if new and leaves the first date alone if not.
+    # "INSERT OR IGNORE" then "UPDATE" does both: the credits follow the
+    # newest file read, and first_seen stays the day we first saw them.
     connection = connect()
     cursor = connection.cursor()
 
     cursor.execute("""
-        INSERT OR REPLACE INTO student
-            (student_id, program, level, credits_this_term)
-        VALUES (?, ?, ?, ?)
-    """, (student_id, program, level, credits_this_term))
+        INSERT OR IGNORE INTO student
+            (student_id, credits_this_term, first_seen)
+        VALUES (?, ?, ?)
+    """, (student_id, credits_this_term, first_seen))
+    cursor.execute("""
+        UPDATE student SET credits_this_term = ? WHERE student_id = ?
+    """, (credits_this_term, student_id))
 
     connection.commit()
     connection.close()
@@ -413,3 +421,26 @@ def export_tables():
     results.to_csv(settings.project_file("table_scan_result.csv"), index=False)
 
     return len(students), len(notices)
+
+
+def notices_already_sent():
+    """Every student who has already been notified, and when.
+
+    The interface used to keep this in memory alone, so closing the
+    browser made every notice disappear from the screen while its row sat
+    in this table unread. A notice is a record of something that actually
+    happened, so the screen reads it back from here.
+    """
+    connection = connect()
+    rows = pd.read_sql_query("""
+        SELECT student_id, MAX(made_on) AS made_on
+        FROM notice
+        WHERE state = 'sent'
+        GROUP BY student_id
+    """, connection)
+    connection.close()
+
+    sent = {}
+    for i in range(len(rows)):
+        sent[rows["student_id"].iloc[i]] = rows["made_on"].iloc[i]
+    return sent

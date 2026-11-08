@@ -1,0 +1,7 @@
+Day,What the model could see,Recall,Precision,ROC_AUC,PR_AUC,Flagged_%
+50,what the record says,0.7321,0.5377,0.7507,0.6968,52.3
+50,what the student does,0.7803,0.4924,0.7123,0.6187,60.8
+50,the record and the doing,0.7658,0.5616,0.7815,0.7255,52.4
+100,what the record says,0.7424,0.6502,0.8302,0.8006,43.8
+100,what the student does,0.7672,0.5578,0.7773,0.7253,52.8
+100,the record and the doing,0.7803,0.6387,0.8538,0.8226,46.9

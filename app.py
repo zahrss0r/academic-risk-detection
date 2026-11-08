@@ -36,7 +36,7 @@ import joblib
 
 import settings
 import database
-
+import university_rules
 
 INDICATORS = settings.MODEL_INDICATORS
 
@@ -99,7 +99,7 @@ TEXT = {
     "why":          ("لماذا ظهر هذا الطالب", "Why this student appears"),
     "read_n":       ("قرأ النظام {n} من {total} مؤشرات لهذا السجل",
                      "The system read {n} of {total} indicators for this record"),
-    "prob":         ("احتمال التعثر", "probability"),
+    "prob":         ("احتمال التعثر", "Probability"),
     "no_prob":      ("لا يُحسب احتمال لطالب أمسكته اللائحة",
                      "No probability is computed for a student a regulation caught"),
     "state":        ("حالة الإنذار", "Notice"),
@@ -120,7 +120,7 @@ TEXT = {
     "silent":       ("صامتة — العمود غير موجود",
                      "silent — the column is not here"),
     "silent_ok":    ("صحيحة ولا تنطبق على أحد عند هذا اليوم",
-                     "correct, and catches nobody at this day"),
+                     "correct, and catches nobody on this day"),
     "ev_test":      ("الاختبار النهائي — فُتح مرة واحدة",
                      "The final test — opened once"),
     "ev_valid":     ("مجموعة التحقق — عليها اختِيرت كل القرارات",
@@ -140,13 +140,39 @@ TEXT = {
     "ev_fair":      ("فحص العدالة — على مجموعة التحقق",
                      "Fairness audit — on the validation set"),
     "ev_fair_note": ("هذه الأعمدة لا تُعطى للنموذج. تُستخدم لمراجعته فقط. "
-                     "والمجموع ٣٧٨٢ لأن الفحص على مجموعة التحقق لا الاختبار.",
+                     "ومجموع كل خاصية ٣٧٨٢ لأن الفحص على مجموعة التحقق "
+                     "لا الاختبار.",
                      "These columns are not given to the model. They are used "
-                     "only to audit it. The groups total 3,782 because this "
-                     "audit runs on the validation set, not the test set."),
+                     "only to audit it. Each attribute totals 3,782 because "
+                     "this audit runs on the validation set, not the test "
+                     "set."),
     "ev_weight":    ("وزن كل مؤشر في القرار", "What each indicator carries"),
+    "ev_timing":    ("اليوم الخمسون أمام اليوم المئة — مجموعة التحقق",
+                     "Day fifty against day one hundred — validation set"),
+    "ev_timing_note": ("نفس التجربة أُجريت عند منتصف الفصل وعند اليوم "
+                       "الخمسين. الفحص عند اليوم الخمسين أضعف في كل رقم، "
+                       "وهذا سبب اختيار اليوم المئة موعداً للفحص.",
+                       "The same experiment was run at mid semester and at "
+                       "day fifty. Every number is weaker at day fifty, and "
+                       "that is why day one hundred is when the scan runs."),
+    "ev_data":      ("نفس الطريقة على ثلاث مجموعات بيانات",
+                     "The same method on three datasets"),
+    "ev_data_note": ("الطريقة نفسها، والمؤشرات هي ما تحمله كل مجموعة. "
+                     "النظام مبني على المجموعة الأولى؛ والاثنتان الأخريان "
+                     "تقولان أين تصلح الطريقة وأين لا تصلح.",
+                     "The same method, with whatever indicators each dataset "
+                     "carries. The system is built on the first one; the "
+                     "other two say where the method holds and where it "
+                     "does not."),
+    "ev_small":     ("الفئة التي عدد طلابها أقل من خمسين تُعدّ ولا تُقاس: "
+                     "خليّة فارغة تعني أننا لم نقِسها، لا أنها صفر.",
+                     "A group of fewer than fifty students is counted but "
+                     "not scored: an empty cell means we did not measure "
+                     "it, not that it is zero."),
     "lang":         ("English", "العربية"),
     "committee":    ("لجنة الإشراف الأكاديمي", "Academic Supervision Committee"),
+    "committee_sub": ("الجهة التي يُرفع إليها الإنذار",
+                      "The body the alert is raised to"),
     "role":         ("حساب اللجنة", "Committee account"),
     "src_file_sub": ("ملف الدفعة بصيغة مفصولة بفواصل",
                      "A cohort file in comma separated form"),
@@ -162,7 +188,7 @@ TEXT = {
     "search":       ("ابحث برقم الطالب", "Search by student number"),
     "chip_all":     ("الكل", "All"),
     "back":         ("سجل الطلاب", "Register"),
-    "nobody":       ("ما فيه طالب بهذا الرقم", "No student with that number"),
+    "nobody":       ("لا يوجد طالب بهذا الرقم", "No student with that number"),
     "click_row":    ("انقر صفاً لفتح سجل الطالب",
                      "Click a row to open that student's record"),
     "file_known":   ("هذا الملف موجود عندنا — رُفع في {when} ويحمل {rows} سجلاً. "
@@ -178,6 +204,16 @@ TEXT = {
     "stored":       ("الملفات المخزَّنة وعمليات فحصها",
                      "Stored files and their scans"),
     "no_stored":    ("لم يُفحص أي ملف بعد.", "Nothing has been scanned yet."),
+    "all_clear":    ("لا أحد على هذا الملف يستدعي إنذاراً: لا اللوائح "
+                     "أمسكت أحداً، ولا النموذج أنذر عن أحد.",
+                     "Nobody on this file needs an alert: no regulation "
+                     "caught anyone, and the model flagged nobody."),
+    "run_again":    ("افحص مرة أخرى", "Scan again"),
+    "run_again_note": ("هذا الملف مفحوص من قبل. الفحص مرة أخرى يُسجَّل "
+                       "فحصاً جديداً بتاريخه، ولا يُلغي الأول.",
+                       "This file has been scanned before. Scanning it "
+                       "again is stored as a new scan with its own date, "
+                       "and does not replace the first."),
     "open_run":     ("افتح هذه النتيجة", "Open this result"),
     "rescan":       ("افحص الملف من جديد", "Scan this file again"),
     "from_store":   ("هذه نتيجة محفوظة من {when} — مقروءة كما كُتبت يومها، "
@@ -189,8 +225,143 @@ TEXT = {
                      "داخل الإطار.",
                      "Use the button to pick a file from your computer, or "
                      "drag a file and drop it inside the box."),
+    "bad_encoding": ("تعذّرت قراءة هذا الملف. احفظه من جديد بترميز UTF-8 "
+                     "ثم ارفعه مرة أخرى. في إكسل: حفظ باسم ← "
+                     "CSV UTF-8.",
+                     "This file could not be read. Save it again as UTF-8 "
+                     "and upload it once more. In Excel: Save As, then "
+                     "CSV UTF-8."),
+    "bad_file":     ("هذا الملف ليس جدول دفعة يمكن قراءته. المطلوب ملف "
+                     "مفصول بفواصل، سطره الأول أسماء الأعمدة، وفيه عمود "
+                     "لرقم الطالب ورمز المقرر.",
+                     "This file is not a cohort table the system can read. "
+                     "It needs to be comma separated, with the column names "
+                     "on the first line, and to carry a student number and "
+                     "a course code."),
+    "empty_file":   ("الملف لا يحتوي على أي سجل.",
+                     "This file carries no records at all."),
+
+    # The four regulations, and what each one needs to be able to speak.
+    # They are keyed by the English name the rules file gives them, so a
+    # rule renamed there is caught here rather than silently mistranslated.
+    "rule_work_not_handed_in":  ("عمل مستحق لم يُسلَّم", "work not handed in"),
+    "rule_absence":             ("الغياب", "absence"),
+    "rule_marks_still_reachable": ("أعلى درجة ما زالت ممكنة",
+                                   "marks still reachable"),
+    "rule_the_withdrawal_window": ("نافذة الاعتذار والانسحاب",
+                                   "the withdrawal window"),
+    "needs_submission_rate":    ("نسبة ما سُلِّم من المطلوب",
+                                 "how much of the due work was handed in"),
+    "needs_a_count_of_unexcused_absences": ("عدد الغيابات غير المعذورة",
+                                            "a count of unexcused absences"),
+    "needs_the_weight_of_each_assessment": ("وزن كل تقييم في المقرر",
+                                            "the weight of each assessment"),
+    "needs_the_date_of_the_final_exam":    ("تاريخ الاختبار النهائي",
+                                            "the date of the final exam"),
+
+    # Column headings. Each one names what is in its own column and
+    # nothing else. An earlier version headed the file name with "a file
+    # I upload" and the date with "pick a scan", which were the labels of
+    # the controls that produced them, not descriptions of the columns.
+    "col_file":     ("الملف", "File"),
+    "col_when":     ("وقت الفحص", "Scanned at"),
+    "col_students": ("عدد الطلاب", "Students"),
+    "col_flagged":  ("منذَر عنهم", "Flagged"),
+    "col_by_rule":  ("باللائحة", "By a regulation"),
+    "col_by_model": ("بالنموذج", "By the model"),
+    "col_carried":  ("مؤشرات الملف", "Indicators in the file"),
+    "col_caught":   ("من أمسكه", "Caught by"),
+    "col_failing":  ("مقررات متعثرة", "Courses in trouble"),
+    "col_courses":  ("مقررات مسجَّلة", "Courses taken"),
+    "col_course":   ("المقرر", "Course"),
+    "col_reason":   ("السبب", "Reason"),
+    "col_prob":     ("احتمال التعثر", "Probability"),
+    "col_read":     ("مؤشرات مقروءة", "Indicators read"),
+    "col_indicator": ("المؤشر", "Indicator"),
+    "col_value":    ("قيمته على هذا السجل", "its value on this record"),
+    "col_share":    ("نصيبه من القرار", "share of the decision"),
+    "col_raw":      ("الوزن الخام", "raw importance"),
+    "col_group":    ("الفئة", "Group"),
+    "col_threshold": ("الحد الفاصل", "Threshold"),
+    "m_recall":     ("الاستدعاء", "Recall"),
+    "m_precision":  ("الدقة", "Precision"),
+    "grp_gender_F": ("إناث", "female"),
+    "grp_gender_M": ("ذكور", "male"),
+    "grp_age_band_0-35":  ("حتى ٣٥ سنة", "up to 35"),
+    "grp_age_band_35-55": ("٣٥ إلى ٥٥ سنة", "35 to 55"),
+    "grp_age_band_55<=":  ("٥٥ فأكثر", "55 and over"),
+    "grp_disability_True":  ("بإعاقة مسجَّلة", "disability recorded"),
+    "grp_disability_False": ("بلا إعاقة مسجَّلة", "no disability recorded"),
+    "yes":          ("نعم", "yes"),
+    "no":           ("لا", "no"),
+    "against_threshold": ("مقابل حد الإنذار {t}", "against the alert threshold of {t}"),
+    "push_note":    ("أقوى {n} مؤشرات دفعت نحو الإنذار، وتحمل {total}٪ من "
+                     "القرار. الباقي موزَّع على بقية المؤشرات.",
+                     "The {n} indicators that pushed hardest towards an "
+                     "alert, carrying {total}% of the decision between "
+                     "them. The rest is spread across the others."),
+
+    # Captions for the three charts on the performance screen.
+    "chart_threshold": ("كيف يتبادل الاستدعاء والدقة عند كل حد فاصل. "
+                        "اخترنا ٠.٣٠ لأن الطالب المفقود يخسر فصلاً، "
+                        "والإنذار الكاذب يكلّف مكالمة.",
+                        "How recall and precision trade off at each "
+                        "threshold. We chose 0.30 because a student we "
+                        "miss loses a term, and a false alarm costs a "
+                        "phone call."),
+    "chart_fair":      ("الاستدعاء والدقة لكل فئة. الفجوة في الدقة بين "
+                        "الإناث والذكور معروضة كما خرجت، ولم تُخفَ.",
+                        "Recall and precision for each group. The "
+                        "precision gap between female and male students "
+                        "is shown as it came out, not hidden."),
+    "chart_weight":    ("نصيب كل مؤشر من القرار. السلوك على المنصة يحمل "
+                        "أكثر مما تحمله الدرجة المبكرة.",
+                        "What each indicator carries of the decision. "
+                        "Behaviour on the platform carries more than the "
+                        "early mark does."),
 }
 
+def count_students(n):
+    """A count of students, written the way each language writes it.
+
+    Arabic does not put a plural after every number the way English does:
+    one is طالب واحد, two is طالبان, three to ten take the plural طلاب,
+    and eleven upwards take the singular again in the accusative, طالباً.
+    Printing "94 طلاب" is the kind of mistake that makes a careful reader
+    stop trusting the rest of the screen, so the four cases are written
+    out here once and used everywhere a count of students is shown.
+    """
+    if st.session_state["lang"] != "ar":
+        return str(n) + (" student" if n == 1 else " students")
+    if n == 1:
+        return "طالب واحد"
+    if n == 2:
+        return "طالبان"
+    if 3 <= n <= 10:
+        return str(n) + " طلاب"
+    return str(n) + " طالباً"
+
+def count_records(n):
+    """The same, for course records rather than students."""
+    if st.session_state["lang"] != "ar":
+        return str(n) + (" course record" if n == 1 else " course records")
+    if n == 1:
+        return "سجل مقرر واحد"
+    if n == 2:
+        return "سجلّا مقرر"
+    if 3 <= n <= 10:
+        return str(n) + " سجلات مقرر"
+    return str(n) + " سجل مقرر"
+
+def count_indicators(seen, total):
+    """How many indicators were readable, out of how many there are."""
+    if st.session_state["lang"] != "ar":
+        return ("The system read " + str(seen) + " of " + str(total)
+                + " indicators for this record")
+    word_seen = str(seen) + (" مؤشرات" if 3 <= seen <= 10 else " مؤشراً")
+    if seen == 1:
+        word_seen = "مؤشراً واحداً"
+    return "قرأ النظام " + word_seen + " من " + str(total) + " لهذا السجل"
 
 # The look of the system. These are the same colours, font and shapes as the
 # simulation the committee was shown, so the working system and the
@@ -265,29 +436,31 @@ button, input, select, textarea { font-family: var(--font); }
 .push{display:flex;justify-content:space-between;gap:14px;padding:10px 0;
       border-bottom:1px solid var(--band);font-size:14.5px}
 .push:last-child{border-bottom:0}
+.push.hd{font-size:12px;font-weight:600;color:var(--muted);padding:6px 0;
+         letter-spacing:.2px}
+.push.hd .v,.push.hd .s{font-weight:600;color:var(--muted)}
 .push .v{font-variant-numeric:tabular-nums;color:var(--ink-2)}
 .push .s{font-weight:700;font-variant-numeric:tabular-nums;color:var(--orange)}
 .note{font-size:13px;color:var(--muted);line-height:1.7;margin-top:12px}
+/* one indicator and the share of the decision it carries, drawn here so
+   the bar is the same green as the rest of the system and the name has a
+   whole line to itself instead of being cut off on a chart's edge */
+.wrow{display:flex;align-items:center;gap:14px;padding:9px 0;
+      border-bottom:1px solid var(--band);font-size:14px}
+.wrow:last-child{border-bottom:0}
+.wrow .nm{flex:0 0 220px}
+.wrow .track{flex:1 1 auto;height:9px;border-radius:5px;background:var(--band)}
+.wrow .fill{display:block;height:9px;border-radius:5px;background:var(--green)}
+.wrow .s{flex:0 0 72px;text-align:end;font-weight:700;color:var(--green);
+         font-variant-numeric:tabular-nums}
 /* the bar across the very top, with the university's mark on it */
 .nav{background:var(--paper);border:1px solid var(--line);border-radius:12px;
      padding:12px 18px;display:flex;align-items:center;gap:16px;margin-bottom:14px}
 .nav .logo img{height:34px;width:auto;display:block}
-.nav .who{margin-inline-start:auto;display:flex;align-items:center;gap:10px}
-.nav .av{width:34px;height:34px;border-radius:50%;background:var(--green-l);
-         color:var(--green);display:flex;align-items:center;justify-content:center;
-         font-size:13px;font-weight:700;flex:0 0 34px}
+.nav .who{margin-inline-start:auto;display:flex;flex-direction:column;
+          text-align:end}
 .nav .t1{font-size:13.5px;font-weight:600;line-height:1.3}
 .nav .t2{font-size:12px;color:var(--muted);line-height:1.3}
-/* the two source cards */
-.src{display:flex;align-items:center;gap:12px;border:1px solid var(--line);
-     background:var(--paper);border-radius:10px;padding:14px 16px;margin-bottom:9px}
-.src.on{border-color:var(--green);background:var(--green-l)}
-.src .rd{width:16px;height:16px;border-radius:50%;border:2px solid #c3cbd9;flex:0 0 16px}
-.src.on .rd{border-color:var(--green);background:radial-gradient(var(--green) 42%,#fff 46%)}
-.src .t1{font-size:14.5px;font-weight:600}
-.src .t2{font-size:12.5px;color:var(--muted)}
-.src .rt{margin-inline-start:auto;font-size:12.5px;color:var(--muted)}
-.src.off{opacity:.55}
 /* the five steps of the scan */
 .steps{display:flex;background:var(--paper);border:1px solid var(--line);
        border-radius:12px;overflow:hidden;margin-bottom:16px;flex-wrap:wrap}
@@ -303,7 +476,7 @@ button, input, select, textarea { font-family: var(--font); }
 /* the scan log */
 .log{background:#0d1b3e;color:#c9d6f5;border-radius:10px;padding:15px 17px;
      font-size:13px;line-height:2;font-variant-numeric:tabular-nums;
-     margin-bottom:18px;direction:ltr;text-align:left}
+     margin-bottom:18px}
 .log b{color:var(--green-br);font-weight:400}
 .log .d{color:#7f91bf}
 /* the breadcrumb on a student's page */
@@ -328,7 +501,6 @@ button, input, select, textarea { font-family: var(--font); }
 </style>
 """
 
-
 def say(key, **kw):
     """One label, in whichever language is showing."""
     pair = TEXT[key]
@@ -337,12 +509,21 @@ def say(key, **kw):
         text = text.format(**kw)
     return text
 
+def plain_date(text):
+    """A date and time that reads the same in both languages.
+
+    A browser laying out Arabic reorders a run of digits and dashes by its
+    own rules, so "2026-11-08 16:17" came out as "16:17 08-11-2026" in the
+    middle of an Arabic sentence: the time first and the day and year
+    swapped. Marking the stamp left to right stops that, and the same
+    stamp then reads the same wherever it appears.
+    """
+    return "⁦" + str(text) + "⁩"
 
 def word(name):
     """The plain name of one indicator."""
     pair = WORDS.get(name, (name, name))
     return pair[0] if st.session_state["lang"] == "ar" else pair[1]
-
 
 # ---------------------------------------------------------------
 # Reading
@@ -350,7 +531,6 @@ def word(name):
 @st.cache_resource
 def load_model():
     return joblib.load(settings.project_file("final_model.pkl"))
-
 
 def read_cohort(source):
     """Read a cohort file and line its columns up with what the model needs.
@@ -370,13 +550,11 @@ def read_cohort(source):
 
     return table, missing
 
-
 def tile(number, label, colour):
     """One counting tile, the same shape the simulation uses."""
     css = "tile " + colour if colour else "tile"
     return ('<div class="' + css + '"><div class="n">' + str(number)
             + '</div><div class="t">' + label + '</div></div>')
-
 
 def register_rows(people, found, kind):
     """One row per student, ready to be put on screen."""
@@ -387,10 +565,14 @@ def register_rows(people, found, kind):
         bad = mine[mine["flagged"]]
         rows.append({
             say("student"): str(who),
-            "": caught,
-            say("failing_in"): len(bad),
-            say("courses"): len(mine),
-            say("state"): (say("sent") if who in st.session_state["sent"]
+            say("col_caught"): caught,
+            say("col_failing"): len(bad),
+            say("col_courses"): len(mine),
+            # Keyed by the student number as text. The database returns
+            # it as text and the cohort file reads it as a number, and a
+            # notice sent yesterday has to be recognised either way.
+            say("state"): (say("sent")
+                           if str(who) in st.session_state["sent"]
                            else say("waiting")),
         })
 
@@ -410,9 +592,8 @@ def register_rows(people, found, kind):
         return "color:#6b7280"
 
     return (table.style
-            .map(colour_caught, subset=[""])
+            .map(colour_caught, subset=[say("col_caught")])
             .map(colour_state, subset=[say("state")]))
-
 
 def indicators_read(row):
     """How many of the indicators carried a value for this one record."""
@@ -422,31 +603,22 @@ def indicators_read(row):
             seen = seen + 1
     return seen
 
-
 # ---------------------------------------------------------------
 # The scan
 
 def rule_caught(table):
-    """Apply the regulations we can apply to this file.
+    """Ask the regulations about every row of the file.
 
-    Rule three, work not handed in: the regulation says work that was due and
-    not submitted scores zero unless an excuse is filed. A student who has
-    not handed in everything that was due is exactly a student whose
-    submission_rate is below 100, so the rule reads that column.
-
-    The other three regulations are built in university_rules.py and are
-    silent here, each for a reason that is written down:
-      - absence         : this data has no absence column
-      - marks reachable : counting the final exam's marks, no student is
-                          arithmetically lost this early in the term
-      - the window      : it needs the date of that course's final, which is
-                          not in a cohort file
-    A silent rule is not a broken rule. It is waiting for a column.
+    The regulations themselves live in university_rules.py and nowhere
+    else. This asks them row by row rather than repeating any of their
+    arithmetic here, so there is one place where the university's rules
+    are written down and one answer to what they say.
     """
-    if "submission_rate" not in table.columns:
-        return pd.Series(False, index=table.index)
-    return table["submission_rate"] < 100
-
+    answers = []
+    for i in range(len(table)):
+        summary = university_rules.cohort_row_summary(table.iloc[i])
+        answers.append(summary["status"] != "clear")
+    return pd.Series(answers, index=table.index)
 
 def scan(table, model):
     """The whole scan, in the order the system is built on."""
@@ -474,17 +646,50 @@ def scan(table, model):
 
     return found
 
+def columns_we_keep(table):
+    """The cohort file with only the columns the system actually reads.
 
-def keep_scan(file_name, contents, found, carried):
+    A cohort file may carry far more than the system uses, including the
+    six columns describing who a student is: gender, region, age band,
+    deprivation band, prior education and disability. The model is never
+    shown those, and database.py says plainly that nothing identifying a
+    person outside the university's own records is stored.
+
+    Keeping the uploaded file whole broke that promise quietly, because
+    those columns went into the database along with everything else. So
+    what is stored is the part the system read: who the record is about,
+    which course, and the eleven indicators. Everything else is dropped
+    before the file is written down.
+    """
+    wanted = ["id_student", "code_module", "code_presentation"] + INDICATORS
+    keep = [c for c in wanted if c in table.columns]
+    return table[keep].to_csv(index=False)
+
+def keep_scan(file_name, table, found, carried):
     """Store the file, the run and everything the run flagged.
 
-    The file goes in whole, so it can be scanned again later. The results
-    go in with the reason already written out, so an old scan reads exactly
-    as it read on the day rather than being worked out again.
+    The file is stored so it can be scanned again later, trimmed to the
+    columns the system reads. The results go in with the reason already
+    written out, so an old scan reads exactly as it read on the day rather
+    than being worked out again from a model that may have changed since.
     """
     when = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
+    contents = columns_we_keep(table)
     file_id = database.save_file(file_name, contents, len(found), when)
+
+    # Every student the file carries, flagged or not, gets a row. The
+    # notice table points at this one, so a notice with no student behind
+    # it would be a notice about nobody. A student on two courses has one
+    # row here and two records in the scan, which is the whole point of
+    # keeping the two apart.
+    for who, part in table.groupby("id_student"):
+        credits = part["studied_credits"].max() \
+            if "studied_credits" in part.columns else None
+        database.save_student(
+            str(who),
+            None if credits is None or pd.isna(credits) else int(credits),
+            when)
 
     people = found.groupby("id_student")["flagged"].any()
     rule_people = found[found["rule"]]["id_student"].unique()
@@ -504,13 +709,25 @@ def keep_scan(file_name, contents, found, carried):
         row = found.iloc[i]
         if not row["flagged"]:
             continue
+        if row["rule"]:
+            reason = rule_reason(row)
+        else:
+            # The model's reason is the handful of indicators that pushed
+            # this record towards an alert, and it is written down here
+            # rather than worked out again later. A stored scan has to read
+            # as it read on the day: the model may be retrained, and an old
+            # notice must not quietly change its mind afterwards. Before
+            # this, every model student's stored reason was the three words
+            # "caught by the model", which repeat the heading above them
+            # and tell an advisor nothing.
+            reason = model_reason_line(row, load_model())
+
         rows.append({
             "student_id": str(row["id_student"]),
             "course_code": str(row["code_module"]) + " "
                            + str(row["code_presentation"]),
             "caught_by": "rule" if row["rule"] else "model",
-            "reason": (rule_reason(row) if row["rule"]
-                       else say("by_model")),
+            "reason": reason,
             "probability": (None if row["rule"]
                             else float(row["probability"])),
             "indicators_read": int(row["indicators_read"]),
@@ -518,7 +735,6 @@ def keep_scan(file_name, contents, found, carried):
     database.save_results(run_id, rows)
 
     return run_id
-
 
 def scan_log(found, missing_count):
     """What the scan did, written out line by line.
@@ -530,30 +746,59 @@ def scan_log(found, missing_count):
     rule_rows = int(found["rule"].sum())
     asked = int((~found["rule"]).sum())
     model_rows = int(found["model_alert"].sum())
+    records = len(found)
+    students = found["id_student"].nunique()
 
-    lines = [
-        ("read " + str(len(found)) + " course records for "
-         + str(found["id_student"].nunique()) + " students"),
-        ("indicators carried by this file: "
-         + str(len(INDICATORS) - missing_count) + " of " + str(len(INDICATORS))),
-        ("regulations applied to all " + str(len(found)) + " records"),
-        ("caught by a regulation: " + str(rule_rows) + " records"),
-        ("put to the model: " + str(asked) + " records"),
-        ("flagged by the model at " + str(settings.ALERT_THRESHOLD) + ": "
-         + str(model_rows) + " records"),
-        ("gathered into " + str(len(people)) + " students"),
-        ("flagged: " + str(int(people.sum())) + "   clear: "
-         + str(int((~people).sum()))),
+    # The first six lines count course records and the last two count
+    # students, and the log says which each time. Without that, the log and
+    # the tiles underneath it appear to contradict each other: a student
+    # taking two courses is caught once as a student and twice as a record.
+    ar = [
+        "قرأ " + count_records(records) + " تخص " + count_students(students),
+        "المؤشرات التي يحملها الملف: "
+        + str(len(INDICATORS) - missing_count) + " من " + str(len(INDICATORS)),
+        "طُبِّقت اللوائح على السجلات كلها، وعددها " + str(records),
+        "أمسكت اللائحة " + count_records(rule_rows),
+        "عُرض على النموذج " + count_records(asked),
+        "أنذر النموذج عند حد " + format(settings.ALERT_THRESHOLD, ".2f")
+        + " على "
+        + count_records(model_rows),
+        "جُمِّعت السجلات في " + count_students(students),
+        "المنذَر عنهم " + count_students(int(people.sum()))
+        + "، ولا شيء على " + count_students(int((~people).sum())),
     ]
+    en = [
+        "read " + count_records(records) + " for "
+        + count_students(students),
+        "indicators carried by this file: "
+        + str(len(INDICATORS) - missing_count) + " of " + str(len(INDICATORS)),
+        "regulations applied to all " + count_records(records),
+        "caught by a regulation: " + count_records(rule_rows),
+        "put to the model: " + count_records(asked),
+        "flagged by the model at "
+        + format(settings.ALERT_THRESHOLD, ".2f") + ": "
+        + count_records(model_rows),
+        "gathered into " + count_students(students),
+        "flagged: " + count_students(int(people.sum())) + "   clear: "
+        + count_students(int((~people).sum())),
+    ]
+
+    lines = ar if st.session_state["lang"] == "ar" else en
+    done = "تم" if st.session_state["lang"] == "ar" else "done"
 
     out = ""
     for line in lines:
         out = out + '<span class="d">&gt;</span> ' + line + "<br>"
-    return out + '<b>done</b>'
-
+    return out + "<b>" + done + "</b>"
 
 def rule_reason(row):
-    """Why a regulation caught this record. Computed from the row itself."""
+    """Why a regulation caught this record, in the language on screen.
+
+    The arithmetic is the rules file's, not this screen's: the numbers are
+    read from the same row the rule read. Only the sentence around them is
+    written here, because a rule should not have to know which language a
+    committee is reading in.
+    """
     handed_in = row["submission_rate"]
     not_handed = round(100 - handed_in, 1)
     if st.session_state["lang"] == "ar":
@@ -569,7 +814,6 @@ def rule_reason(row):
     return (str(round(handed_in, 1)) + "% of the work that was due was handed "
             "in, and " + str(not_handed) + "% was not. What was not handed in "
             "scores zero unless an excuse is filed.")
-
 
 def model_reasons(row, model, how_many=3):
     """Which indicators pushed this record towards an alert, and by how much.
@@ -591,23 +835,81 @@ def model_reasons(row, model, how_many=3):
     for i in order[:how_many]:
         if pushes[i] <= 0:
             continue
+        name = INDICATORS[i]
+        value = row[name]
+
+        # Each indicator is shown in the unit it is measured in. Several
+        # of them are percentages and used to be printed as a bare number,
+        # so a lateness of two thirds read as "66.67" with nothing to say
+        # what that was two thirds of.
+        if pd.isna(value):
+            shown = "—"
+        elif name in ["submission_rate", "late_rate", "activity_days_rate",
+                      "early_score"]:
+            shown = format(float(value), ".1f") + "%"
+        elif name in ["late_registration", "early_score_missing",
+                      "late_rate_missing"]:
+            shown = say("yes") if float(value) >= 1 else say("no")
+        else:
+            shown = format(float(value), ".0f")
+
         out.append({
-            "name": word(INDICATORS[i]),
+            "name": word(name),
             "share": round(abs(pushes[i]) / total * 100, 1),
-            "value": row[INDICATORS[i]],
+            "value": value,
+            "shown": shown,
         })
     return out
 
+def group_words(attribute, group):
+    """A name for one audited group, short enough to read under a bar.
+
+    The audit's own labels are F, M, True, False and two age bands. Put
+    on a chart as they are, half of them say nothing and the other half
+    say the wrong thing, so each one is given a short plain name. They
+    are kept short on purpose: a long label is turned on its edge by the
+    chart and then cut off.
+    """
+    key = "grp_" + attribute + "_" + group
+    if key in TEXT:
+        return say(key)
+    return group
+
+
+def model_reason_line(row, model):
+    """The same reason, written as one line of text.
+
+    A stored scan and a sent notice have to carry the same justification,
+    because they are two records of one decision. Writing the line in one
+    place is what keeps them from drifting apart.
+    """
+    parts = []
+    for push in model_reasons(row, model):
+        parts.append(push["name"] + " " + push["shown"]
+                     + " (" + str(push["share"]) + "%)")
+    joiner = "، " if st.session_state["lang"] == "ar" else ", "
+    return joiner.join(parts)
 
 # ---------------------------------------------------------------
 # The page
 
-st.set_page_config(page_title="Academic Risk Detection", layout="wide")
+# The browser tab. Streamlit fixes this before the language is known, so
+# it carries both names rather than claiming the page is only English.
+st.set_page_config(page_title="الكشف المبكر عن التعثر · Academic Risk",
+                   page_icon="🎓", layout="wide",
+                   initial_sidebar_state="collapsed")
 
 if "lang" not in st.session_state:
     st.session_state["lang"] = "ar"
+# The tables are made before anything is read from them, because the very
+# first thing this screen does is ask which notices have already been sent.
+database.create_tables()
+
 if "sent" not in st.session_state:
-    st.session_state["sent"] = {}
+    # Read back from the database rather than started empty. A notice that
+    # was sent yesterday is a thing that happened, and closing the browser
+    # does not unhappen it.
+    st.session_state["sent"] = database.notices_already_sent()
 if "found" not in st.session_state:
     st.session_state["found"] = None
 if "log" not in st.session_state:
@@ -621,11 +923,6 @@ if "stored" not in st.session_state:
 if "stored_when" not in st.session_state:
     st.session_state["stored_when"] = ""
 
-with st.sidebar:
-    if st.button(say("lang")):
-        st.session_state["lang"] = "en" if st.session_state["lang"] == "ar" else "ar"
-        st.rerun()
-
 if st.session_state["lang"] == "ar":
     # Arabic reads right to left, so the writing is turned round. The tables
     # are left alone on purpose: a table of student numbers and percentages
@@ -637,6 +934,48 @@ if st.session_state["lang"] == "ar":
         .stApp li, .stApp .stMarkdown, .stApp .stCaption {
             direction: rtl; text-align: right;
         }
+        /* The tab strip, the buttons and the radio rows are laid out by
+           Streamlit from the left. In Arabic they belong on the right,
+           with the first tab under the start of the heading above it. */
+        .stApp .stTabs div:has(> [data-testid="stTab"]){
+            flex-direction:row-reverse}
+        .stApp .stTabs [data-testid="stTab"]{direction:rtl}
+        /* A radio laid out across the screen starts from the left; in
+           Arabic it starts from the right. One laid out down the screen
+           is already in order and only its dots move to the right side. */
+        .stApp [data-testid="stRadioGroup"][role="radiogroup"]:not(
+            [data-baseweb="radio-group"]){flex-direction:row-reverse}
+        .stApp [data-testid="stRadioOption"]{flex-direction:row-reverse}
+        /* The radio is only as wide as its choices, so left to itself it
+           sits against the left edge while everything around it starts
+           from the right. Pushed over to begin where the rest begins. */
+        .stApp [data-testid="stElementContainer"]:has(
+            > [data-testid="stRadio"]){align-self:flex-end}
+        .stApp [data-testid="stRadio"] [data-testid="stWidgetLabel"] p{
+            text-align:right}
+        .stApp .stButton{display:flex;justify-content:flex-end}
+        .stApp [data-testid="stFileUploaderDropzone"]{flex-direction:row-reverse}
+        .stApp [data-testid="stFileUploaderDropzone"] *{direction:rtl}
+        .stApp [data-testid="stFileUploaderFile"]{direction:rtl}
+        /* Streamlit writes the uploader's own button and its size note in
+           English and gives no way to change them. An English word sitting
+           inside an Arabic line is the one thing this screen must not do,
+           so the English is hidden and the Arabic put in its place. */
+        .stApp [data-testid="stFileUploaderDropzone"]
+            [data-testid="stMarkdownContainer"] p{font-size:0}
+        .stApp [data-testid="stFileUploaderDropzone"]
+            [data-testid="stMarkdownContainer"] p::after{
+                content:"ارفع";font-size:14px}
+        .stApp [data-testid="stFileUploaderDropzoneInstructions"] span{
+            font-size:0}
+        .stApp [data-testid="stFileUploaderDropzoneInstructions"]
+            span::after{content:"حتى ٢٠٠ ميجابايت للملف · صيغة مفصولة "
+                "بفواصل";font-size:13px}
+        /* Streamlit floats a little toolbar over the top corner of every
+           table. In Arabic that corner is where the heading ends, so the
+           toolbar was sitting on top of the words. Pushed clear of them. */
+        .stApp [data-testid="stElementToolbar"]{inset-inline-end:auto;
+            inset-inline-start:0}
         .stApp [data-testid="stDataFrame"],
         .stApp [data-testid="stDataFrame"] * {
             direction: ltr; text-align: left;
@@ -646,7 +985,6 @@ if st.session_state["lang"] == "ar":
     """, unsafe_allow_html=True)
 
 st.markdown(STYLE, unsafe_allow_html=True)
-
 
 @st.cache_data
 def logo_tag():
@@ -661,13 +999,31 @@ def logo_tag():
     except FileNotFoundError:
         return ""
 
-
-# The bar carries the university's mark and nothing else. An earlier
-# version put an account name and initials beside it, copied from the
-# mock up. There is no sign in and there are no user accounts in this
-# system, so showing one would be claiming something that is not there.
-st.markdown('<div class="nav"><span class="logo">' + logo_tag()
-            + '</span></div>', unsafe_allow_html=True)
+# The bar carries the university's mark and the language switch, and
+# nothing else. An earlier version put an account name and initials
+# beside it, copied from the mock up: there is no sign in and there are
+# no user accounts here, so showing one would claim something untrue.
+#
+# The language switch used to live in a side panel that existed for it
+# alone. The panel took three hundred pixels of the screen, sat on the
+# wrong side in Arabic, and folding it away hid the only way back to the
+# other language. It belongs here, across from the mark.
+switch, mark = st.columns([1, 5])
+with switch:
+    if st.button(say("lang"), key="lang_switch"):
+        st.session_state["lang"] = ("en" if st.session_state["lang"] == "ar"
+                                    else "ar")
+        st.rerun()
+with mark:
+    # The bar used to hold the mark and nothing else, which left a wide
+    # empty card across the top of every screen. It carries the name of
+    # the body the system reports to as well, because a university system
+    # should say on sight whose it is.
+    st.markdown('<div class="nav"><span class="logo">' + logo_tag()
+                + '</span><span class="who"><span class="t1">'
+                + say("committee") + '</span><span class="t2">'
+                + say("committee_sub") + '</span></span></div>',
+                unsafe_allow_html=True)
 
 st.markdown(
     '<div class="hero">'
@@ -679,30 +1035,22 @@ st.markdown(
     unsafe_allow_html=True)
 
 model = load_model()
-database.create_tables()
 
 tab_scan, tab_register, tab_evidence = st.tabs(
     [say("tab_scan"), say("tab_register"), say("tab_evidence")])
 
-
 # ---------------------------------------------------------------
 with tab_scan:
-    source = st.radio(say("source"), [say("src_file"), say("src_db")],
-                      horizontal=True, label_visibility="collapsed")
-
-    # The two sources drawn as cards, the way the simulation drew them. The
-    # radio above is what Streamlit listens to; these show which one is on.
+    # Where the cohort comes from. This used to be a radio with a pair of
+    # drawn cards underneath repeating the same two choices, so the screen
+    # asked the same question twice and only one of the two answered. It is
+    # one control now, and what the cards carried — what each source is and
+    # whether it is open to us — is written under its own option.
+    source = st.radio(
+        say("source"), [say("src_file"), say("src_db")],
+        captions=[say("src_file_sub") + " · " + say("ready"),
+                  say("src_db_sub") + " · " + say("not_ready")])
     on_file = source == say("src_file")
-    st.markdown(
-        '<div class="src ' + ("on" if on_file else "") + '">'
-        '<span class="rd"></span><span><span class="t1">' + say("src_file")
-        + '</span><br><span class="t2">' + say("src_file_sub") + '</span></span>'
-        '<span class="rt">' + say("ready") + '</span></div>'
-        '<div class="src off ' + ("on" if not on_file else "") + '">'
-        '<span class="rd"></span><span><span class="t1">' + say("src_db")
-        + '</span><br><span class="t2">' + say("src_db_sub") + '</span></span>'
-        '<span class="rt">' + say("not_ready") + '</span></div>',
-        unsafe_allow_html=True)
 
     if not on_file:
         st.info(say("db_closed"))
@@ -718,7 +1066,23 @@ with tab_scan:
         if handed is None:
             st.caption(say("no_file"))
         else:
-            contents = handed.getvalue().decode("utf-8")
+            # A cohort file saved out of Arabic Excel is often not written
+            # in UTF-8. Reading it blindly used to throw the error straight
+            # onto the screen and take the rest of the page with it, so the
+            # two encodings a Windows machine is likely to produce are tried
+            # as well, and a file in none of them is refused politely.
+            raw = handed.getvalue()
+            contents = None
+            for encoding in ["utf-8", "utf-8-sig", "cp1256"]:
+                try:
+                    contents = raw.decode(encoding)
+                    break
+                except UnicodeDecodeError:
+                    continue
+
+            if contents is None:
+                st.error(say("bad_encoding"))
+                contents = ""
 
             # A different file than last time clears the screen straight
             # away. Otherwise the name at the top would say one file while
@@ -727,37 +1091,76 @@ with tab_scan:
                 st.session_state["file_now"] = handed.name + contents[:200]
                 st.session_state["found"] = None
                 st.session_state["log"] = ""
-                st.session_state["sent"] = {}
+                st.session_state["sent"] = database.notices_already_sent()
+                # The result opened from the database has to go as well.
+                # Without this the register kept showing the students of an
+                # older cohort while the scan screen named the new file, so
+                # the two screens described two different cohorts at once.
+                st.session_state["stored"] = None
+                st.session_state["stored_when"] = ""
 
-            table, missing = read_cohort(io.StringIO(contents))
-            carried = len(INDICATORS) - len(missing)
+            # Decoding into letters is not the same as the letters making a
+            # table. A file in the wrong format, or one that is not a cohort
+            # file at all, fails here rather than at the decode, so the
+            # reading is guarded too and the same plain message is shown.
+            table = None
+            if contents != "":
+                try:
+                    table, missing = read_cohort(io.StringIO(contents))
+                except Exception:
+                    st.error(say("bad_file"))
+                if table is not None and len(table) == 0:
+                    st.error(say("empty_file"))
+                    table = None
 
-            # Is this file already here? The answer comes from its contents,
-            # not its name.
-            already = database.find_file(contents)
-            newer_than = database.other_versions(handed.name, contents)
+            # A file that could not be read stops the scan, and nothing
+            # more. The rest of the screen, including the shelf of files
+            # scanned before, stays where it is: losing the whole page
+            # because one upload was the wrong format helps nobody.
+            if table is not None:
+                carried = len(INDICATORS) - len(missing)
 
-            if already is not None:
-                st.info(say("file_known",
-                            when=str(already["uploaded_on"]),
-                            rows=int(already["rows_in_file"])))
-            elif len(newer_than) > 0:
-                st.warning(say("file_updated", n=len(newer_than)))
+                # Is this file already here? The answer comes from its
+                # contents, not its name — and from the part of those
+                # contents the system actually reads, which is the same
+                # part that gets stored. Fingerprinting the whole upload
+                # instead would mean an uploaded file never matched what
+                # was saved from it.
+                kept = columns_we_keep(table)
+                already = database.find_file(kept)
+                newer_than = database.other_versions(handed.name, kept)
 
-            st.write("**" + say("cols_read") + ":** "
-                     + str(carried) + " / " + str(len(INDICATORS)))
-            if len(missing) > 0:
-                st.warning(say("cols_missing") + ": "
-                           + ", ".join([word(n) for n in missing]))
+                if already is not None:
+                    st.info(say("file_known",
+                                when=plain_date(str(already["uploaded_on"])),
+                                rows=int(already["rows_in_file"])))
+                elif len(newer_than) > 0:
+                    st.warning(say("file_updated", n=len(newer_than)))
 
-            if st.button(say("run"), type="primary"):
-                with st.spinner(say("scanning")):
-                    found = scan(table, model)
-                    st.session_state["found"] = found
-                    st.session_state["log"] = scan_log(found, len(missing))
-                    st.session_state["run_id"] = keep_scan(
-                        handed.name, contents, found, carried)
-                st.rerun()
+                st.write("**" + say("cols_read") + ":** "
+                         + str(carried) + " / " + str(len(INDICATORS)))
+                if len(missing) > 0:
+                    st.warning(say("cols_missing") + ": "
+                               + "، ".join([word(n) for n in missing]))
+
+                # A file the system already holds can be scanned again,
+                # but the button says so and the line underneath says what
+                # happens to the first scan. An advisor pressing a button
+                # marked "scan" on a file already scanned has no way of
+                # knowing whether the earlier one is about to be lost.
+                if already is not None:
+                    st.caption(say("run_again_note"))
+                button_says = say("run_again") if already is not None \
+                    else say("run")
+
+                if st.button(button_says, type="primary"):
+                    with st.spinner(say("scanning")):
+                        found = scan(table, model)
+                        st.session_state["found"] = found
+                        st.session_state["log"] = scan_log(found, len(missing))
+                        st.session_state["run_id"] = keep_scan(
+                            handed.name, table, found, carried)
+                    st.rerun()
 
     found = st.session_state["found"]
     if found is not None:
@@ -788,27 +1191,29 @@ with tab_scan:
             + tile(len(model_people), say("by_model"), "o")
             + tile(int((~people).sum()), say("clear"), "g")
             + '</div>', unsafe_allow_html=True)
-        st.caption(str(len(found)) + " " + say("rows"))
+        st.caption(count_records(len(found)))
 
         # What the regulations could and could not reach in this file. Each
         # line is the rule's own answer, not a claim made on its behalf.
         st.divider()
         st.subheader(say("rules_state"))
-        st.dataframe(pd.DataFrame([
-            {say("rule_name"): "work not handed in",
-             say("rule_needs"): "submission_rate",
-             say("rule_says"): say("speaks") + " — " + str(len(rule_people))
-                               + " " + say("students")},
-            {say("rule_name"): "marks still reachable",
-             say("rule_needs"): "assessment weights",
-             say("rule_says"): say("silent_ok")},
-            {say("rule_name"): "withdrawal window",
-             say("rule_needs"): "exam_day",
-             say("rule_says"): say("silent")},
-            {say("rule_name"): "absence",
-             say("rule_needs"): "absence count",
-             say("rule_says"): say("silent")},
-        ]), hide_index=True, width="stretch")
+
+        # Each line is the rule's own answer about this file, asked of the
+        # rules file itself. Nothing here is a sentence written by hand, so
+        # the table cannot drift away from what the rules actually did.
+        reach = university_rules.what_the_rules_can_reach(found.iloc[0])
+        lines = []
+        for r in reach:
+            if r["silent"]:
+                verdict = say("silent")
+            else:
+                verdict = say("speaks") + " — " + count_students(len(rule_people))
+            lines.append({
+                say("rule_name"): say("rule_" + r["rule"].replace(" ", "_")),
+                say("rule_needs"): say("needs_" + r["needs"].replace(" ", "_")),
+                say("rule_says"): verdict,
+            })
+        st.dataframe(pd.DataFrame(lines), hide_index=True, width="stretch")
 
     # Everything scanned so far, so any earlier cohort can be opened again
     # or put through the system a second time.
@@ -820,13 +1225,13 @@ with tab_scan:
         st.caption(say("no_stored"))
     else:
         shelf = pd.DataFrame({
-            say("src_file"): runs["file_name"],
-            say("pick_run"): runs["ran_on"],
-            say("students"): runs["students"],
-            say("flagged"): runs["flagged"],
-            say("by_rule"): runs["by_rule"],
-            say("by_model"): runs["by_model"],
-            say("cols_read"): runs["indicators_carried"],
+            say("col_file"): runs["file_name"],
+            say("col_when"): runs["ran_on"],
+            say("col_students"): runs["students"],
+            say("col_flagged"): runs["flagged"],
+            say("col_by_rule"): runs["by_rule"],
+            say("col_by_model"): runs["by_model"],
+            say("col_carried"): runs["indicators_carried"],
         })
         chosen_run = st.dataframe(shelf, hide_index=True, width="stretch",
                                   on_select="rerun",
@@ -854,10 +1259,9 @@ with tab_scan:
                     st.session_state["stored"] = None
                     st.session_state["log"] = scan_log(found, len(missing))
                     st.session_state["run_id"] = keep_scan(
-                        str(run["file_name"]), contents, found,
+                        str(run["file_name"]), table, found,
                         len(INDICATORS) - len(missing))
                 st.rerun()
-
 
 # ---------------------------------------------------------------
 with tab_register:
@@ -868,7 +1272,8 @@ with tab_register:
         # A result opened from the database. It is read back exactly as it
         # was written, so there is no model here and nothing is worked out
         # again: these are the sentences the system gave on the day.
-        st.info(say("from_store", when=st.session_state["stored_when"]))
+        st.info(say("from_store",
+                    when=plain_date(st.session_state["stored_when"])))
 
         # A student belongs to one block, not two. If any one of his course
         # records was caught by a regulation, that is why the committee is
@@ -885,17 +1290,40 @@ with tab_register:
                 part = stored[~stored["student_id"].isin(rule_students)]
             if len(part) == 0:
                 continue
+            # Sorted by the student number as a number. Sorting it as
+            # text put 1411627 before 141648 and left the committee
+            # looking at an order nobody could explain.
+            part = part.copy()
+            part["_n"] = pd.to_numeric(part["student_id"], errors="coerce")
+            part = part.sort_values(["_n", "course_code"])
+
+            # The heading counts students and course records separately,
+            # because this table has one row per record while the heading
+            # used to give a student count over it.
             st.markdown('<div class="blockhead">' + heading
                         + ' <span class="sm">· '
-                        + str(part["student_id"].nunique()) + " "
-                        + say("students") + '</span></div>',
+                        + count_students(part["student_id"].nunique())
+                        + " · " + count_records(len(part))
+                        + '</span></div>',
                         unsafe_allow_html=True)
+
+            # A probability that does not exist is left as an empty cell
+            # rather than printed as the word None. The live register says
+            # in a sentence why a rule-caught student has no probability;
+            # in a table an empty cell says the same thing.
+            chance = []
+            for v in part["probability"].values:
+                chance.append("" if pd.isna(v) else format(float(v), ".2f"))
+
             shown = pd.DataFrame({
                 say("student"): part["student_id"].values,
-                say("courses"): part["course_code"].values,
-                say("why"): part["reason"].values,
-                say("prob"): part["probability"].values,
-                say("cols_read"): part["indicators_read"].values,
+                say("col_course"): part["course_code"].values,
+                say("col_caught"): [say("by_rule") if c == "rule"
+                                    else say("by_model")
+                                    for c in part["caught_by"].values],
+                say("col_reason"): part["reason"].values,
+                say("col_prob"): chance,
+                say("col_read"): part["indicators_read"].values,
             })
             st.dataframe(shown, hide_index=True, width="stretch")
 
@@ -935,18 +1363,29 @@ with tab_register:
                 continue
 
             st.markdown('<div class="blockhead">' + heading
-                        + ' <span class="sm">· ' + str(len(shown)) + " "
-                        + say("students") + '</span></div>',
+                        + ' <span class="sm">· ' + count_students(len(shown))
+                        + '</span></div>',
                         unsafe_allow_html=True)
 
             table = register_rows(shown, found, kind)
             chosen = st.dataframe(
                 table, hide_index=True, width="stretch",
                 on_select="rerun", selection_mode="single-row",
-                key="reg_" + kind)
+                # The search text is part of the key on purpose. Changing
+                # the search builds a fresh table with nothing selected,
+                # instead of carrying the old row's position over to a
+                # different list of students.
+                key="reg_" + kind + "_" + which + "_" + looking_for.strip())
 
+            # Streamlit hands back the position of the chosen row, and that
+            # position belongs to the table as it was drawn. Typing in the
+            # search box redraws a shorter table while the old position is
+            # still remembered, so the position is checked against the list
+            # it is about to be used on. Without this check a search could
+            # throw an error onto the screen, or quietly open a different
+            # student than the one whose row was clicked.
             rows_picked = chosen["selection"]["rows"]
-            if len(rows_picked) > 0:
+            if len(rows_picked) > 0 and rows_picked[0] < len(shown):
                 picked = shown[rows_picked[0]]
 
         if picked is None and looking_for.strip() != "":
@@ -954,7 +1393,13 @@ with tab_register:
             if not any(looking_for.strip() in str(w) for w in everyone):
                 st.caption(say("nobody"))
 
-        st.caption(say("click_row"))
+        # A cohort where nobody is flagged used to leave this part of the
+        # screen blank, which reads as a system that did not run rather
+        # than one that ran and found nothing.
+        if len(rule_people) == 0 and len(model_people) == 0:
+            st.info(say("all_clear"))
+        else:
+            st.caption(say("click_row"))
 
         # One student, opened.
         if picked is not None:
@@ -975,37 +1420,61 @@ with tab_register:
                     inside = ('<p class="why">' + rule_reason(row) + '</p>'
                               '<p class="note">' + say("no_prob") + '</p>')
                 else:
+                    # The threshold is given beside the probability. A
+                    # number on its own invites the question "compared to
+                    # what", and the answer is the only thing that makes
+                    # the number mean anything.
                     inside = ('<p class="why">' + say("prob") + ": <b>"
-                              + str(round(float(row["probability"]), 4))
-                              + "</b></p>")
-                    for push in model_reasons(row, model):
-                        value = push["value"]
-                        shown = "—" if pd.isna(value) else str(round(float(value), 2))
+                              + format(float(row["probability"]), ".2f")
+                              + "</b> " + say("against_threshold",
+                                              t=format(settings.ALERT_THRESHOLD,
+                                                       ".2f"))
+                              + "</p>")
+                    pushes = model_reasons(row, model)
+                    # Three numbers in a row mean nothing without saying
+                    # what each column is. A share of 23.9 per cent was
+                    # sitting beside a value of 63.5 per cent with no word
+                    # anywhere on the card to tell the two apart.
+                    if len(pushes) > 0:
+                        inside = inside + (
+                            '<div class="push hd"><span>'
+                            + say("col_indicator") + '</span>'
+                            '<span class="v">' + say("col_value") + '</span>'
+                            '<span class="s">' + say("col_share") + '</span>'
+                            '</div>')
+                    for push in pushes:
                         inside = inside + (
                             '<div class="push"><span>' + push["name"] + '</span>'
-                            '<span class="v">' + shown + '</span>'
+                            '<span class="v">' + push["shown"] + '</span>'
                             '<span class="s">' + str(push["share"]) + '%</span>'
                             '</div>')
+                    # And what the three of them add up to, so nobody has
+                    # to wonder what happened to the rest of the decision.
+                    carried = round(sum(x["share"] for x in pushes), 1)
+                    inside = inside + ('<p class="note">'
+                                       + say("push_note", n=len(pushes),
+                                             total=carried) + '</p>')
 
                 st.markdown(
                     '<div class="box">'
                     '<h3>' + str(row["code_module"]) + " "
                     + str(row["code_presentation"]) + '</h3>'
                     '<div class="cap">'
-                    + say("read_n", n=int(row["indicators_read"]),
-                          total=len(INDICATORS))
+                    + count_indicators(int(row["indicators_read"]),
+                                       len(INDICATORS))
                     + ' · <span class="tag '
                     + ("r" if row["rule"] else "o") + '">'
                     + (say("by_rule") if row["rule"] else say("by_model"))
                     + '</span></div>' + inside + '</div>',
                     unsafe_allow_html=True)
 
-            if who in st.session_state["sent"]:
-                st.success(say("sent_at") + ": " + st.session_state["sent"][who])
+            if str(who) in st.session_state["sent"]:
+                st.success(say("sent_at") + ": "
+                           + plain_date(st.session_state["sent"][str(who)]))
             else:
                 if st.button(say("send"), key="send_" + str(who), type="primary"):
                     when = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-                    st.session_state["sent"][who] = when
+                    st.session_state["sent"][str(who)] = when
                     for i in range(len(mine)):
                         row = mine.iloc[i]
                         if not row["flagged"]:
@@ -1018,8 +1487,7 @@ with tab_register:
                             day_of_term=settings.CUT_DAY,
                             caught_by="rule" if row["rule"] else "model",
                             reason=(rule_reason(row) if row["rule"]
-                                    else "model, p="
-                                         + str(round(float(row["probability"]), 4))),
+                                    else model_reason_line(row, model)),
                             probability=(None if row["rule"]
                                          else float(row["probability"])),
                             indicators_read=int(row["indicators_read"]),
@@ -1027,26 +1495,203 @@ with tab_register:
                     st.rerun()
             st.caption(say("stop_note"))
 
-
 # ---------------------------------------------------------------
 with tab_evidence:
-    def show(file_name, caption):
+    # The result files are written in English by the scripts that produce
+    # them, because that is the language of the report. On screen they are
+    # read by whoever is in the room, so the column names and the words
+    # inside the cells are both turned into the language being shown.
+    HEADINGS = {
+        "Split": ("كيف قُسِّمت البيانات", "Split"),
+        "Threshold": ("الحد الفاصل", "Threshold"),
+        "Accuracy": ("الإصابة الكلية", "Accuracy"),
+        "Precision": ("الدقة", "Precision"),
+        "Recall": ("الاستدعاء", "Recall"),
+        "F1": ("المتوسط التوافقي", "F1"),
+        "ROC_AUC": ("المساحة تحت منحنى ROC", "ROC AUC"),
+        "PR_AUC": ("المساحة تحت منحنى الدقة والاستدعاء", "PR AUC"),
+        "Who decides": ("من يقرر", "Who decides"),
+        "Rows_flagged": ("سجلات منذَر عنها", "Records flagged"),
+        "What the model could see": ("ماذا يرى النموذج",
+                                     "What the model could see"),
+        "Columns": ("عدد الأعمدة", "Columns"),
+        "Flagged": ("منذَر عنهم", "Flagged"),
+        "Flagged_%": ("نسبة المنذَر عنهم", "Flagged %"),
+        "Caught": ("ملقوطون", "Caught"),
+        "Missed": ("مفقودون", "Missed"),
+        "False_alarms": ("إنذارات كاذبة", "False alarms"),
+        "Fold_spread": ("تذبذب الطيّات", "Fold spread"),
+        "Note": ("ملاحظة", "Note"),
+        "Attribute": ("الخاصية", "Attribute"),
+        "Group": ("الفئة", "Group"),
+        "Students": ("عدد الطلاب", "Students"),
+        "Model": ("الخوارزمية", "Model"),
+        "Share_%": ("نصيبه من القرار %", "Share of the decision %"),
+        "Feature": ("المؤشر", "Indicator"),
+        "Importance": ("الوزن الخام", "Raw importance"),
+        "Missed_students": ("طلاب مفقودون", "Students missed"),
+        "Indicators": ("عدد المؤشرات", "Indicators"),
+        "Dataset": ("مجموعة البيانات", "Dataset"),
+        "CV_recall": ("استدعاء التحقق المتقاطع", "CV recall"),
+        "CV_Recall": ("استدعاء التحقق المتقاطع", "CV recall"),
+        "AUC": ("المساحة تحت منحنى ROC", "ROC AUC"),
+        "CV_spread": ("تذبذب الطيّات", "CV spread"),
+        "Day": ("يوم الفصل", "Day of term"),
+        "Rows_available": ("السجلات المتاحة", "Rows available"),
+        "Sample_rows": ("السجلات المستخدمة", "Rows used"),
+        "At_risk_share": ("نسبة المتعثرين", "At risk share"),
+        "Test_rows": ("سجلات الاختبار", "Test rows"),
+    }
+    CELLS = {
+        "random (final test)": ("عشوائي — الاختبار النهائي",
+                                "random (final test)"),
+        "time based (newest term)": ("زمني — أحدث فصل",
+                                     "time based (newest term)"),
+        "the rule alone": ("اللائحة وحدها", "the rule alone"),
+        "the model alone": ("النموذج وحده", "the model alone"),
+        "the rule first, then the model": ("اللائحة أولاً ثم النموذج",
+                                           "the rule first, then the model"),
+        "who the student is": ("من هو الطالب", "who the student is"),
+        "what the record says": ("ما يسجّله المقرر", "what the record says"),
+        "what the student does": ("ما يفعله الطالب", "what the student does"),
+        "the record and the doing": ("السجل والسلوك معاً",
+                                     "the record and the doing"),
+        # The three columns the fairness audit reads, and their values.
+        # The published data writes them as gender / F / True; on screen
+        # they are written the way a committee would say them.
+        "gender": ("الجنس", "gender"),
+        "age_band": ("الفئة العمرية", "age band"),
+        "disability": ("إعاقة مسجَّلة", "disability recorded"),
+        "F": ("إناث", "female"),
+        "M": ("ذكور", "male"),
+        "0-35": ("حتى ٣٥ سنة", "up to 35"),
+        "35-55": ("٣٥ إلى ٥٥ سنة", "35 to 55"),
+        "55<=": ("٥٥ فأكثر", "55 and over"),
+        "True": ("نعم", "yes"),
+        "False": ("لا", "no"),
+    }
+
+    def dress(frame):
+        """Put a result table into the language on screen."""
+        out = frame.copy()
+        # An empty cell is left empty. Streamlit prints a missing number
+        # as the word None, which reads as a value rather than as the
+        # absence of one, and the absence is the thing being said. Only
+        # the columns that actually have a gap are rewritten, so the rest
+        # of the table stays numbers and stays lined up on the right.
+        for name in out.columns:
+            if out[name].isna().any():
+                out[name] = ["" if pd.isna(v) else v for v in out[name]]
+        # The threshold is written 0.30 on the student's card and in the
+        # scan log, so it is written 0.30 here too. One number should not
+        # have two spellings inside one system.
+        if "Threshold" in out.columns:
+            out["Threshold"] = [format(float(v), ".2f")
+                                for v in out["Threshold"]]
+        side = 0 if st.session_state["lang"] == "ar" else 1
+        out = out.replace({k: v[side] for k, v in CELLS.items()})
+        out.columns = [HEADINGS.get(c, (c, c))[side] for c in out.columns]
+        return out
+
+    def show(file_name, caption, height=None):
         try:
-            st.caption(caption)
-            st.dataframe(pd.read_csv(settings.project_file(file_name)),
-                         hide_index=True, width="stretch")
+            frame = pd.read_csv(settings.project_file(file_name))
         except FileNotFoundError:
             st.caption(caption + " — " + file_name)
+            return None
+        st.caption(caption)
+        if height is None:
+            st.dataframe(dress(frame), hide_index=True, width="stretch")
+        else:
+            st.dataframe(dress(frame), hide_index=True, width="stretch",
+                         height=height)
+        return frame
 
     show("results_final.csv", say("ev_test"))
     show("results_rule_vs_model.csv", say("ev_rule"))
-    show("results_indicator_groups.csv", say("ev_groups"))
-    show("results_threshold_table.csv", say("ev_thresh"))
+
+    # The indicator groups carry a long sentence in their last column, so
+    # the table is given room rather than clipping the one line that
+    # explains why the system refuses to look at who a student is.
+    show("results_indicator_groups.csv", say("ev_groups"), height=220)
+
+    # The same comparison run at day fifty as well. A committee that asks
+    # why the scan waits until day one hundred is asking what the earlier
+    # day looked like, and the answer is a table, not an opinion.
+    st.caption(say("ev_timing_note"))
+    show("results_timing.csv", say("ev_timing"), height=250)
+
+    st.divider()
+    threshold = show("results_threshold_table.csv", say("ev_thresh"))
+    if threshold is not None and "Recall" in threshold.columns:
+        st.caption(say("chart_threshold"))
+        # A chart takes its legend from the column names, so the columns
+        # are renamed before it is drawn. Two English words in the corner
+        # of an Arabic screen are still two English words.
+        line = threshold.set_index("Threshold")[["Recall", "Precision"]]
+        line.columns = [say("m_recall"), say("m_precision")]
+        line.index.name = say("col_threshold")
+        st.line_chart(line, color=["#1b8354", "#b45309"], height=320)
+
+    st.divider()
     show("results_model_comparison.csv", say("ev_models"))
 
     st.divider()
     st.caption(say("ev_fair_note"))
-    show("results_fairness.csv", say("ev_fair"))
+    fair = show("results_fairness.csv", say("ev_fair"))
+    if fair is not None and "Precision" in fair.columns:
+        st.caption(say("ev_small"))
+        st.caption(say("chart_fair"))
+        # Only the groups that were scored are drawn. A group left
+        # unmeasured has no bar, because a bar of zero would say we
+        # measured a recall of zero, which is not what the empty cell
+        # in the table above means.
+        drawn = fair.dropna(subset=["Recall", "Precision"]).copy()
+        # Each bar is named by its attribute as well as its group, because
+        # "True" and "F" on their own say nothing, and the two measures
+        # stand side by side rather than stacked: a recall and a precision
+        # added together make a number that means nothing.
+        drawn[say("col_group")] = [
+            group_words(str(a), str(g))
+            for a, g in zip(drawn["Attribute"], drawn["Group"])]
+        # Laid on its side, so each group's name has a line of its own
+        # instead of being stood on its edge under a bar.
+        bars = drawn.set_index(say("col_group"))[["Recall", "Precision"]]
+        bars.columns = [say("m_recall"), say("m_precision")]
+        st.bar_chart(bars, color=["#1b8354", "#b45309"], height=360,
+                     stack=False, horizontal=True)
 
     st.divider()
-    show("results_feature_importance.csv", say("ev_weight"))
+    # The weight of each indicator, as a table with the bar drawn inside
+    # it. This used to be a table of raw column names beside a separate
+    # chart, and the chart cut every name off after a few letters because
+    # the words are phrases, not labels. With the bar in the row, the name
+    # has the whole width of a column and the bar still shows the order at
+    # a glance.
+    try:
+        weight = pd.read_csv(settings.project_file(
+            "results_feature_importance.csv"))
+    except FileNotFoundError:
+        weight = None
+
+    if weight is not None:
+        st.caption(say("ev_weight"))
+        st.caption(say("chart_weight"))
+        widest = float(weight["Share_%"].max())
+        bars = ('<div class="push hd"><span>' + say("col_indicator")
+                + '</span><span class="s">' + say("col_share")
+                + '</span></div>')
+        for i in range(len(weight)):
+            share = float(weight["Share_%"].iloc[i])
+            bars = bars + (
+                '<div class="wrow"><span class="nm">'
+                + word(str(weight["Feature"].iloc[i])) + '</span>'
+                '<span class="track"><span class="fill" style="width:'
+                + format(share / widest * 100, ".1f") + '%"></span></span>'
+                '<span class="s">' + format(share, ".2f") + '%</span></div>')
+        st.markdown('<div class="box">' + bars + '</div>',
+                    unsafe_allow_html=True)
+
+    st.divider()
+    st.caption(say("ev_data_note"))
+    show("results_dataset_comparison.csv", say("ev_data"))
