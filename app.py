@@ -63,7 +63,7 @@ TEXT = {
                      "Reads the cohort, applies the regulations, notifies the advisor"),
     "tab_scan":     ("فحص الدفعة", "Scan"),
     "tab_register": ("سجل الطلاب", "Register"),
-    "tab_evidence": ("أداء النظام", "Evidence"),
+    "tab_evidence": ("أداء النظام", "System performance"),
     "source":       ("مصدر البيانات", "Where the data comes from"),
     "src_file":     ("ملف أرفعه", "A file I upload"),
     "src_db":       ("قاعدة بيانات الجامعة", "The university database"),
@@ -121,6 +121,16 @@ TEXT = {
                      "silent — the column is not here"),
     "silent_ok":    ("صحيحة ولا تنطبق على أحد عند هذا اليوم",
                      "correct, and catches nobody on this day"),
+    "ev_what":      ("هذه الأرقام تصف النموذج نفسه، لا الملف الذي تفحصه. "
+                     "قيست مرة واحدة على ٢٨٢٨ سجلاً لم يرها النموذج أثناء "
+                     "التدريب، ونُعرف نتيجتها. ولا تتغير بتغيّر الدفعة، "
+                     "لأن الفصل الجاري لم تُعرف نتيجته بعد.",
+                     "These numbers describe the model itself, not the file "
+                     "you are scanning. They were measured once on 2,828 "
+                     "records the model never saw in training, whose "
+                     "outcome is known. They do not change when the cohort "
+                     "changes, because a term still running has no outcome "
+                     "yet."),
     "ev_test":      ("الاختبار النهائي — فُتح مرة واحدة",
                      "The final test — opened once"),
     "ev_valid":     ("مجموعة التحقق — عليها اختِيرت كل القرارات",
@@ -171,8 +181,6 @@ TEXT = {
                      "it, not that it is zero."),
     "lang":         ("English", "العربية"),
     "committee":    ("لجنة الإشراف الأكاديمي", "Academic Supervision Committee"),
-    "committee_sub": ("الجهة التي يُرفع إليها الإنذار",
-                      "The body the alert is raised to"),
     "role":         ("حساب اللجنة", "Committee account"),
     "src_file_sub": ("ملف الدفعة بصيغة مفصولة بفواصل",
                      "A cohort file in comma separated form"),
@@ -455,12 +463,9 @@ button, input, select, textarea { font-family: var(--font); }
          font-variant-numeric:tabular-nums}
 /* the bar across the very top, with the university's mark on it */
 .nav{background:var(--paper);border:1px solid var(--line);border-radius:12px;
-     padding:12px 18px;display:flex;align-items:center;gap:16px;margin-bottom:14px}
+     padding:12px 18px;display:inline-flex;align-items:center;
+     margin-bottom:14px}
 .nav .logo img{height:34px;width:auto;display:block}
-.nav .who{margin-inline-start:auto;display:flex;flex-direction:column;
-          text-align:end}
-.nav .t1{font-size:13.5px;font-weight:600;line-height:1.3}
-.nav .t2{font-size:12px;color:var(--muted);line-height:1.3}
 /* the five steps of the scan */
 .steps{display:flex;background:var(--paper);border:1px solid var(--line);
        border-radius:12px;overflow:hidden;margin-bottom:16px;flex-wrap:wrap}
@@ -1015,15 +1020,11 @@ with switch:
                                     else "ar")
         st.rerun()
 with mark:
-    # The bar used to hold the mark and nothing else, which left a wide
-    # empty card across the top of every screen. It carries the name of
-    # the body the system reports to as well, because a university system
-    # should say on sight whose it is.
+    # The university's mark, and nothing beside it. The name of the
+    # committee is already on the banner underneath, and writing it twice
+    # on one screen said it no better the second time.
     st.markdown('<div class="nav"><span class="logo">' + logo_tag()
-                + '</span><span class="who"><span class="t1">'
-                + say("committee") + '</span><span class="t2">'
-                + say("committee_sub") + '</span></span></div>',
-                unsafe_allow_html=True)
+                + '</span></div>', unsafe_allow_html=True)
 
 st.markdown(
     '<div class="hero">'
@@ -1606,6 +1607,11 @@ with tab_evidence:
             st.dataframe(dress(frame), hide_index=True, width="stretch",
                          height=height)
         return frame
+
+    # What these tables are, said before the first of them. Without this
+    # line a reader who has just scanned a cohort takes the numbers for
+    # the result of that scan, which is the one thing they are not.
+    st.info(say("ev_what"))
 
     show("results_final.csv", say("ev_test"))
     show("results_rule_vs_model.csv", say("ev_rule"))
