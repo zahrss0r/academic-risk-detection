@@ -462,9 +462,13 @@ button, input, select, textarea { font-family: var(--font); }
 .wrow .s{flex:0 0 72px;text-align:end;font-weight:700;color:var(--green);
          font-variant-numeric:tabular-nums}
 /* the bar across the very top, with the university's mark on it */
+/* The mark sits on the right in both languages. It is the university's
+   own artwork, not a piece of writing, so it does not change sides with
+   the text. Forcing the bar's direction is what keeps it there when the
+   rest of the screen turns around. */
 .nav{background:var(--paper);border:1px solid var(--line);border-radius:12px;
-     padding:12px 18px;display:inline-flex;align-items:center;
-     margin-bottom:14px}
+     padding:12px 18px;display:flex;align-items:center;margin-bottom:14px;
+     direction:rtl}
 .nav .logo img{height:34px;width:auto;display:block}
 /* the five steps of the scan */
 .steps{display:flex;background:var(--paper);border:1px solid var(--line);
