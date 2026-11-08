@@ -1,0 +1,4 @@
+Who decides,Rows_flagged,Recall,Precision
+the rule alone,864,0.5463,0.7234
+the model alone,1346,0.7832,0.6657
+"the rule first, then the model",1493,0.8033,0.6155

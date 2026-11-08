@@ -1,611 +1,1052 @@
-# app.py
-#
-# The screen the academic advisor uses.
-#
-# The system has two halves and this screen keeps them apart on purpose:
-#
-#   the policy engine   what the university rules already say about this
-#                       student today, counted with plain arithmetic
-#
-#   the trained model   of the students no rule has caught yet, which ones
-#                       look like the students who did not pass
-#
-# They are shown side by side rather than combined into one number, because
-# they are different kinds of claim. One is counted from regulations and is
-# certain. The other is estimated and is not. Averaging them together would
-# let a certainty and a guess cancel each other out, and the advisor would
-# not be able to tell which was which.
+"""
+The interface of the Smart Academic Risk Detection System.
 
-import streamlit as st
+Three screens, and the order between them is the order of the work:
+
+  1. Scan      - read a cohort file and find the students in trouble
+  2. Register  - one row per student, and what the trouble is per course
+  3. Evidence  - how well the system does, from the result files
+
+WHAT THIS SCREEN DOES AND WHERE IT STOPS
+The system reads a cohort, applies the university's regulations, asks the
+model about the students no regulation caught, and tells the advisor. Then it
+stops. It does not advise the advisor what to do, it does not record what the
+advisor decided, and it does not follow the case afterwards. Those belong to
+the advisor and the student.
+
+THE ORDER IS STRICT
+Every row meets the regulations first. A row a regulation catches is never
+put to the model at all: no probability is computed for it and none is shown.
+A regulation is arithmetic and arithmetic is not appealed to a probability.
+
+NOTHING IS INVENTED
+Every reason shown beside a student is computed from that student's own row.
+Where the file does not carry a column, the rule that needs it says so and
+stays silent, and the model is told the value is missing rather than given a
+zero. A zero means "measured as none"; missing means "not known".
+"""
+
+import datetime
+import io
+
+import numpy as np
 import pandas as pd
+import streamlit as st
 import joblib
-from datetime import date
 
 import settings
-import university_rules
 import database
 
-FEATURES = settings.MODEL_INDICATORS
 
-st.set_page_config(page_title="Academic Risk Detection", layout="wide")
+INDICATORS = settings.MODEL_INDICATORS
 
-model = joblib.load(settings.project_file("final_model.pkl"))
-
-# The three demonstration sets. Every student in them was kept out of the
-# training set, the validation set and the test set, so nothing shown on
-# these screens has been seen by the model or counted in any reported
-# number. See settings.py for why there are three.
-demo_sets = {}
-for name in settings.DEMO_SETS:
-    demo_sets[name] = pd.read_csv(settings.project_file("demo_" + name + ".csv"))
-
-DEMO_LABELS = {
-    "supervisor": "Supervisor meeting",
-    "final": "Final committee",
-    "backup": "Spare set",
+# Plain words for each indicator, in both languages. The model's column names
+# are for the code; these are what a person reads.
+WORDS = {
+    "early_score":          ("الدرجة المكتسبة حتى الآن", "marks earned so far"),
+    "early_score_missing":  ("لا توجد درجة مرصودة", "no mark recorded yet"),
+    "submission_rate":      ("نسبة ما سُلِّم من المطلوب", "share of due work handed in"),
+    "late_rate":            ("نسبة ما سُلِّم متأخراً", "share handed in late"),
+    "late_rate_missing":    ("لم يُسلّم شيئاً", "nothing handed in at all"),
+    "total_clicks":         ("مرات فتح المقرر", "times the course was opened"),
+    "activity_days_rate":   ("نسبة أيام النشاط", "share of days active"),
+    "longest_gap_days":     ("أطول انقطاع بالأيام", "longest gap in days"),
+    "num_of_prev_attempts": ("محاولات سابقة في المقرر", "previous attempts"),
+    "studied_credits":      ("الساعات المسجلة", "credits registered"),
+    "late_registration":    ("تسجيل متأخر", "registered late"),
 }
 
-# Creates predictions.db the first time the application runs, and does
-# nothing on every run after that.
-database.create_tables()
+TEXT = {
+    "title":        ("نظام الكشف المبكر عن التعثر الأكاديمي",
+                     "Smart Academic Risk Detection System"),
+    "subtitle":     ("يقرأ الدفعة، يطبّق اللائحة، ثم ينذر المرشد",
+                     "Reads the cohort, applies the regulations, notifies the advisor"),
+    "tab_scan":     ("فحص الدفعة", "Scan"),
+    "tab_register": ("سجل الطلاب", "Register"),
+    "tab_evidence": ("أداء النظام", "Evidence"),
+    "source":       ("مصدر البيانات", "Where the data comes from"),
+    "src_file":     ("ملف أرفعه", "A file I upload"),
+    "src_db":       ("قاعدة بيانات الجامعة", "The university database"),
+    "db_closed":    ("غير متاح في هذه النسخة. النظام مصمم ليقرأ من قاعدة "
+                     "الجامعة مباشرة، ولم يُمنح الوصول بعد.",
+                     "Not available in this version. The system is built to "
+                     "read the university database directly and has not been "
+                     "given access yet."),
+    "upload":       ("ارفع ملف الدفعة", "Upload a cohort file"),
+    "no_file":      ("لم يُرفع ملف بعد.", "No file yet."),
+    "run":          ("ابدأ الفحص", "Run the scan"),
+    "scanning":     ("جاري الفحص", "Scanning"),
+    "cols_read":    ("المؤشرات التي يحملها الملف",
+                     "Indicators this file carries"),
+    "cols_missing": ("أعمدة غير موجودة في الملف، والنموذج أُبلغ أنها مجهولة "
+                     "ولم تُعطَ صفراً",
+                     "Columns this file does not carry. The model was told "
+                     "they are unknown, not given a zero."),
+    "students":     ("طلاب", "students"),
+    "rows":         ("سجلات مقرر", "course records"),
+    "flagged":      ("منذَر عنهم", "flagged"),
+    "clear":        ("لا شيء عليهم", "clear"),
+    "by_rule":      ("أمسكتهم اللائحة", "caught by a regulation"),
+    "by_model":     ("أمسكهم النموذج", "caught by the model"),
+    "rule_block":   ("اللائحة أمسكتهم — سبب حسابي يمكن التحقق منه",
+                     "Caught by a regulation — arithmetic the advisor can check"),
+    "model_block":  ("النموذج أمسكهم — لم تنطبق عليهم لائحة",
+                     "Caught by the model — no regulation applied to them"),
+    "student":      ("الطالب", "Student"),
+    "courses":      ("المقررات", "courses"),
+    "failing_in":   ("متعثر في", "in trouble in"),
+    "pick":         ("اختر طالباً لعرض سجله", "Pick a student to open the record"),
+    "why":          ("لماذا ظهر هذا الطالب", "Why this student appears"),
+    "read_n":       ("قرأ النظام {n} من {total} مؤشرات لهذا السجل",
+                     "The system read {n} of {total} indicators for this record"),
+    "prob":         ("احتمال التعثر", "probability"),
+    "no_prob":      ("لا يُحسب احتمال لطالب أمسكته اللائحة",
+                     "No probability is computed for a student a regulation caught"),
+    "state":        ("حالة الإنذار", "Notice"),
+    "waiting":      ("في الانتظار", "waiting"),
+    "sent":         ("أُرسل للمرشد", "sent to the advisor"),
+    "send":         ("أرسل للمرشد الأكاديمي", "Notify the academic advisor"),
+    "sent_at":      ("أُرسل في", "Sent"),
+    "stop_note":    ("ينتهي دور النظام هنا. ما يفعله المرشد بعد ذلك ليس من "
+                     "شأن النظام ولا يُسجَّل فيه.",
+                     "The system's part ends here. What the advisor does next "
+                     "is not the system's business and is not recorded in it."),
+    "rules_state":  ("حالة اللوائح على هذا الملف",
+                     "What the regulations can reach in this file"),
+    "rule_name":    ("اللائحة", "Regulation"),
+    "rule_needs":   ("تحتاج", "needs"),
+    "rule_says":    ("على هذا الملف", "on this file"),
+    "speaks":       ("تتكلم", "speaks"),
+    "silent":       ("صامتة — العمود غير موجود",
+                     "silent — the column is not here"),
+    "silent_ok":    ("صحيحة ولا تنطبق على أحد عند هذا اليوم",
+                     "correct, and catches nobody at this day"),
+    "ev_test":      ("الاختبار النهائي — فُتح مرة واحدة",
+                     "The final test — opened once"),
+    "ev_valid":     ("مجموعة التحقق — عليها اختِيرت كل القرارات",
+                     "The validation set — where every decision was made"),
+    "ev_rule":      ("اللائحة أمام النموذج، على الاختبار النهائي",
+                     "The regulation against the model, on the final test"),
+    "ev_groups":    ("ماذا يرى النموذج — مجموعة التحقق",
+                     "What the model can see — validation set"),
+    "ev_thresh":    ("كل حد فاصل جربناه — مجموعة التحقق، لأن عليها اختِير الحد",
+                     "Every threshold we tried — validation set, because that "
+                     "is where the threshold was chosen"),
+    "ev_models":    ("الخوارزميات الأربع عند حد ٠.٥٠ — مجموعة التحقق. "
+                     "الأرقام هنا لا تقارن بالاختبار النهائي أعلاه.",
+                     "The four algorithms at a threshold of 0.50 — validation "
+                     "set. These numbers are not comparable with the final "
+                     "test above."),
+    "ev_fair":      ("فحص العدالة — على مجموعة التحقق",
+                     "Fairness audit — on the validation set"),
+    "ev_fair_note": ("هذه الأعمدة لا تُعطى للنموذج. تُستخدم لمراجعته فقط. "
+                     "والمجموع ٣٧٨٢ لأن الفحص على مجموعة التحقق لا الاختبار.",
+                     "These columns are not given to the model. They are used "
+                     "only to audit it. The groups total 3,782 because this "
+                     "audit runs on the validation set, not the test set."),
+    "ev_weight":    ("وزن كل مؤشر في القرار", "What each indicator carries"),
+    "lang":         ("English", "العربية"),
+    "committee":    ("لجنة الإشراف الأكاديمي", "Academic Supervision Committee"),
+    "role":         ("حساب اللجنة", "Committee account"),
+    "src_file_sub": ("ملف الدفعة بصيغة مفصولة بفواصل",
+                     "A cohort file in comma separated form"),
+    "src_db_sub":   ("قراءة مباشرة من سجلات الجامعة",
+                     "Read straight from the university's records"),
+    "ready":        ("متاح", "available"),
+    "not_ready":    ("غير متاح", "not available"),
+    "step1":        ("قراءة الملف", "Read the file"),
+    "step2":        ("تطبيق اللوائح", "Apply the regulations"),
+    "step3":        ("سؤال النموذج", "Ask the model"),
+    "step4":        ("تجميع الطلاب", "Gather by student"),
+    "step5":        ("فتح السجل", "Open the register"),
+    "search":       ("ابحث برقم الطالب", "Search by student number"),
+    "chip_all":     ("الكل", "All"),
+    "back":         ("سجل الطلاب", "Register"),
+    "nobody":       ("ما فيه طالب بهذا الرقم", "No student with that number"),
+    "click_row":    ("انقر صفاً لفتح سجل الطالب",
+                     "Click a row to open that student's record"),
+    "file_known":   ("هذا الملف موجود عندنا — رُفع في {when} ويحمل {rows} سجلاً. "
+                     "الفحص سيضيف عملية جديدة عليه، ولن يُخزَّن الملف مرتين.",
+                     "This file is already stored — uploaded {when}, "
+                     "carrying {rows} records. Scanning adds another run on "
+                     "it, and the file is not stored twice."),
+    "file_updated": ("ملف بهذا الاسم موجود ({n} نسخة)، لكن محتوى الملف الذي "
+                     "رفعته الآن مختلف. سيُحفظ كنسخة محدَّثة مستقلة.",
+                     "A file of this name is already stored ({n} version(s)), "
+                     "but what you just uploaded is not the same file. It "
+                     "will be kept as a separate, updated version."),
+    "stored":       ("الملفات المخزَّنة وعمليات فحصها",
+                     "Stored files and their scans"),
+    "no_stored":    ("لم يُفحص أي ملف بعد.", "Nothing has been scanned yet."),
+    "open_run":     ("افتح هذه النتيجة", "Open this result"),
+    "rescan":       ("افحص الملف من جديد", "Scan this file again"),
+    "from_store":   ("هذه نتيجة محفوظة من {when} — مقروءة كما كُتبت يومها، "
+                     "دون إعادة فحص.",
+                     "A stored result from {when}, read back as it was "
+                     "written on the day, without scanning again."),
+    "pick_run":     ("اختر عملية فحص", "Pick a scan"),
+    "drag":         ("اضغط الزر لاختيار ملف من جهازك، أو اسحب الملف وأفلته "
+                     "داخل الإطار.",
+                     "Use the button to pick a file from your computer, or "
+                     "drag a file and drop it inside the box."),
+}
+
+
+# The look of the system. These are the same colours, font and shapes as the
+# simulation the committee was shown, so the working system and the
+# simulation are recognisably the one thing. The green is the university's.
+STYLE = """
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --green:#1b8354; --green-d:#074d31; --green-l:#eaf4ef; --green-br:#6fe3ab;
+  --ink:#212529; --ink-2:#4b5563; --muted:#6b7280;
+  --paper:#fff; --band:#f3f4f6; --line:#e5e7eb;
+  --red:#b3261e; --red-l:#fdecea;
+  --orange:#b45309; --orange-l:#fff4e8;
+  --font:"IBM Plex Sans Arabic","Segoe UI",system-ui,sans-serif;
+}
+/* The font is set here and left to be inherited. It is deliberately NOT
+   forced onto every element: Streamlit draws its small icons with a font
+   where a word like "upload" is a picture rather than letters, so an
+   element that sets its own font has to be allowed to keep it. Forcing
+   ours everywhere printed the word "upload" beside the button. */
+html, body, .stApp { font-family: var(--font); }
+button, input, select, textarea { font-family: var(--font); }
+.stApp [data-testid="stIconMaterial"]{font-family:'Material Symbols Rounded'!important}
+.stApp { background: var(--band); color: var(--ink); }
+.block-container { padding-top: 1.2rem; max-width: 1280px; }
+#MainMenu, footer, header { visibility: hidden; }
+/* the band across the top, the same one the simulation opens with */
+.hero{background:var(--green-d);color:#fff;border-radius:14px;padding:34px 26px;
+      text-align:center;position:relative;overflow:hidden;margin-bottom:22px}
+.hero:after{content:"";position:absolute;inset-inline-start:-110px;top:-170px;
+            width:460px;height:460px;border-radius:50%;background:rgba(27,131,84,.5)}
+.hero .kick{font-size:13.5px;color:#9fd3b9;letter-spacing:.3px;margin-bottom:10px;
+            position:relative;z-index:1}
+.hero h1{font-size:clamp(24px,4vw,36px);font-weight:700;line-height:1.3;
+         position:relative;z-index:1;margin:0}
+.hero .lede{font-size:15.5px;color:#cfe6da;margin-top:12px;position:relative;z-index:1}
+/* the counting tiles */
+.split{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
+       gap:14px;margin:4px 0 20px}
+.tile{background:var(--paper);border:1px solid var(--line);border-radius:12px;
+      padding:22px 16px;text-align:center;min-width:0}
+.tile .n{font-size:36px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.tile .t{font-size:14.5px;color:var(--ink-2);margin-top:8px}
+.tile.r .n{color:var(--red)} .tile.o .n{color:var(--orange)} .tile.g .n{color:var(--green)}
+/* the register, laid out the way the simulation lays it out */
+.card{background:var(--paper);border:1px solid var(--line);border-radius:12px;
+      overflow:hidden;margin-bottom:20px}
+.card .scroll{overflow-x:auto}
+.card table{width:100%;border-collapse:collapse;font-size:15px}
+.card thead th{text-align:start;font-weight:500;font-size:13px;color:var(--muted);
+               padding:12px 18px;border-bottom:1px solid var(--line);white-space:nowrap}
+.card tbody td{padding:14px 18px;border-bottom:1px solid var(--band)}
+.card tbody tr:last-child td{border-bottom:0}
+.card tr.rulerow td:first-child{box-shadow:inset 3px 0 0 var(--red)}
+.card tr.modelrow td:first-child{box-shadow:inset 3px 0 0 var(--orange)}
+.blockhead{background:var(--band);padding:12px 18px;font-size:13.5px;
+           font-weight:600;color:var(--ink-2);border-bottom:1px solid var(--line)}
+.blockhead .sm{font-weight:400;color:var(--muted);font-size:12.5px}
+.sid{font-weight:700;font-variant-numeric:tabular-nums;font-size:16px}
+.tag{display:inline-block;border-radius:20px;padding:4px 12px;font-size:12.5px;
+     font-weight:600;white-space:nowrap}
+.tag.r{background:var(--red-l);color:var(--red)}
+.tag.o{background:var(--orange-l);color:var(--orange)}
+.tag.g{background:var(--green-l);color:var(--green)}
+/* one student, opened */
+.box{background:var(--paper);border:1px solid var(--line);border-radius:12px;
+     padding:24px;margin-bottom:16px}
+.box h3{font-size:18px;font-weight:700;margin:0 0 2px}
+.box .cap{font-size:12.5px;color:var(--muted);margin-bottom:16px}
+.why{font-size:14.5px;color:var(--ink-2);line-height:1.75;margin:0}
+.push{display:flex;justify-content:space-between;gap:14px;padding:10px 0;
+      border-bottom:1px solid var(--band);font-size:14.5px}
+.push:last-child{border-bottom:0}
+.push .v{font-variant-numeric:tabular-nums;color:var(--ink-2)}
+.push .s{font-weight:700;font-variant-numeric:tabular-nums;color:var(--orange)}
+.note{font-size:13px;color:var(--muted);line-height:1.7;margin-top:12px}
+/* the bar across the very top, with the university's mark on it */
+.nav{background:var(--paper);border:1px solid var(--line);border-radius:12px;
+     padding:12px 18px;display:flex;align-items:center;gap:16px;margin-bottom:14px}
+.nav .logo img{height:34px;width:auto;display:block}
+.nav .who{margin-inline-start:auto;display:flex;align-items:center;gap:10px}
+.nav .av{width:34px;height:34px;border-radius:50%;background:var(--green-l);
+         color:var(--green);display:flex;align-items:center;justify-content:center;
+         font-size:13px;font-weight:700;flex:0 0 34px}
+.nav .t1{font-size:13.5px;font-weight:600;line-height:1.3}
+.nav .t2{font-size:12px;color:var(--muted);line-height:1.3}
+/* the two source cards */
+.src{display:flex;align-items:center;gap:12px;border:1px solid var(--line);
+     background:var(--paper);border-radius:10px;padding:14px 16px;margin-bottom:9px}
+.src.on{border-color:var(--green);background:var(--green-l)}
+.src .rd{width:16px;height:16px;border-radius:50%;border:2px solid #c3cbd9;flex:0 0 16px}
+.src.on .rd{border-color:var(--green);background:radial-gradient(var(--green) 42%,#fff 46%)}
+.src .t1{font-size:14.5px;font-weight:600}
+.src .t2{font-size:12.5px;color:var(--muted)}
+.src .rt{margin-inline-start:auto;font-size:12.5px;color:var(--muted)}
+.src.off{opacity:.55}
+/* the five steps of the scan */
+.steps{display:flex;background:var(--paper);border:1px solid var(--line);
+       border-radius:12px;overflow:hidden;margin-bottom:16px;flex-wrap:wrap}
+.sp2{flex:1 1 160px;padding:13px 15px;display:flex;align-items:center;gap:10px;
+     border-inline-start:1px solid var(--band);min-width:0}
+.sp2:first-child{border-inline-start:0}
+.sp2 .dot{width:24px;height:24px;border-radius:50%;background:var(--band);
+          color:var(--muted);font-size:12px;font-weight:700;display:flex;
+          align-items:center;justify-content:center;flex:0 0 24px}
+.sp2.done .dot{background:var(--green);color:#fff}
+.sp2 .tx{font-size:13px;color:var(--muted);min-width:0}
+.sp2.done .tx{color:var(--ink);font-weight:600}
+/* the scan log */
+.log{background:#0d1b3e;color:#c9d6f5;border-radius:10px;padding:15px 17px;
+     font-size:13px;line-height:2;font-variant-numeric:tabular-nums;
+     margin-bottom:18px;direction:ltr;text-align:left}
+.log b{color:var(--green-br);font-weight:400}
+.log .d{color:#7f91bf}
+/* the breadcrumb on a student's page */
+.crumb{font-size:13px;color:var(--muted);margin-bottom:10px}
+.crumb b{color:var(--ink-2);font-weight:600}
+/* streamlit's own pieces, brought into line */
+.stTabs [data-baseweb="tab-list"]{gap:4px;border-bottom:1px solid var(--line)}
+.stTabs [data-baseweb="tab"]{font-size:15px;color:var(--ink-2);padding:8px 14px}
+.stTabs [aria-selected="true"]{color:var(--green)!important;font-weight:600}
+.stButton button{background:var(--green);color:#fff;border:0;border-radius:8px;
+                 padding:11px 26px;font-size:15px;font-weight:600}
+.stButton button:hover{background:var(--green-d);color:#fff}
+.stButton button p{font-weight:600}
+/* Streamlit paints two small things in its own red: the bar under the
+   chosen tab, and the dot of the chosen radio button. Both are set to the
+   university's green here rather than in a settings file, so the whole
+   look of the system travels with app.py and nothing else has to be
+   copied beside it. */
+.stApp .react-aria-SelectionIndicator{background:var(--green)!important}
+.stApp [data-testid="stRadioOption"]:has(input:checked) > div > div:first-child{
+  background:var(--green)!important}
+</style>
+"""
+
+
+def say(key, **kw):
+    """One label, in whichever language is showing."""
+    pair = TEXT[key]
+    text = pair[0] if st.session_state["lang"] == "ar" else pair[1]
+    if kw:
+        text = text.format(**kw)
+    return text
+
+
+def word(name):
+    """The plain name of one indicator."""
+    pair = WORDS.get(name, (name, name))
+    return pair[0] if st.session_state["lang"] == "ar" else pair[1]
 
 
 # ---------------------------------------------------------------
-# Turning the advisor's mark sheet into the model's nine indicators
+# Reading
+
+@st.cache_resource
+def load_model():
+    return joblib.load(settings.project_file("final_model.pkl"))
+
+
+def read_cohort(source):
+    """Read a cohort file and line its columns up with what the model needs.
+
+    A file may not carry every indicator. Any it does not carry is added as
+    an empty column, not a zero. The model was trained to read an empty cell
+    as "not known" and to decide which way to send it, so telling it the
+    truth is better than filling the gap with a number nobody measured.
+    """
+    table = pd.read_csv(source)
+
+    missing = []
+    for name in INDICATORS:
+        if name not in table.columns:
+            table[name] = np.nan
+            missing.append(name)
+
+    return table, missing
+
+
+def tile(number, label, colour):
+    """One counting tile, the same shape the simulation uses."""
+    css = "tile " + colour if colour else "tile"
+    return ('<div class="' + css + '"><div class="n">' + str(number)
+            + '</div><div class="t">' + label + '</div></div>')
+
+
+def register_rows(people, found, kind):
+    """One row per student, ready to be put on screen."""
+    caught = say("by_rule") if kind == "rule" else say("by_model")
+    rows = []
+    for who in people:
+        mine = found[found["id_student"] == who]
+        bad = mine[mine["flagged"]]
+        rows.append({
+            say("student"): str(who),
+            "": caught,
+            say("failing_in"): len(bad),
+            say("courses"): len(mine),
+            say("state"): (say("sent") if who in st.session_state["sent"]
+                           else say("waiting")),
+        })
+
+    table = pd.DataFrame(rows)
+
+    # The colour says which half of the system caught the student: red for a
+    # regulation, orange for the model. It is the same pair of colours the
+    # rest of the system uses, so the register can be read at a glance.
+    paint = "#fdecea;color:#b3261e" if kind == "rule" else "#fff4e8;color:#b45309"
+
+    def colour_caught(value):
+        return "background-color:" + paint + ";font-weight:600"
+
+    def colour_state(value):
+        if value == say("sent"):
+            return "background-color:#eaf4ef;color:#1b8354;font-weight:600"
+        return "color:#6b7280"
+
+    return (table.style
+            .map(colour_caught, subset=[""])
+            .map(colour_state, subset=[say("state")]))
+
+
+def indicators_read(row):
+    """How many of the indicators carried a value for this one record."""
+    seen = 0
+    for name in INDICATORS:
+        if pd.notna(row[name]):
+            seen = seen + 1
+    return seen
+
+
 # ---------------------------------------------------------------
-#
-# The model was trained on another university's data and speaks in that
-# university's units. An advisor here has a mark sheet, an absence register
-# and a platform report. These functions are the bridge, and every
-# conversion is written out rather than hidden, because this is the part of
-# the system that carries an assumption.
+# The scan
 
-def safe_percent(top, bottom):
-    # Divide and turn into a percentage, returning zero when the bottom is
-    # zero instead of crashing.
-    if bottom > 0:
-        return round(top / bottom * 100, 2)
-    return 0.0
+def rule_caught(table):
+    """Apply the regulations we can apply to this file.
 
+    Rule three, work not handed in: the regulation says work that was due and
+    not submitted scores zero unless an excuse is filed. A student who has
+    not handed in everything that was due is exactly a student whose
+    submission_rate is below 100, so the rule reads that column.
 
-def marks_assessed_so_far(student):
-    # How many marks have actually been assessed today. This is the
-    # denominator for the score, and it matters: 20 out of 25 assessed
-    # marks is a student doing well, 20 out of 60 is not. Dividing both by
-    # 100 would hide the difference completely.
-    total = 0
-    for part in student["due_so_far"]:
-        total = total + settings.COURSEWORK_PLAN[part]
-    if student["midterm_was_held"]:
-        total = total + settings.MIDTERM_MAX
-    return total
+    The other three regulations are built in university_rules.py and are
+    silent here, each for a reason that is written down:
+      - absence         : this data has no absence column
+      - marks reachable : counting the final exam's marks, no student is
+                          arithmetically lost this early in the term
+      - the window      : it needs the date of that course's final, which is
+                          not in a cohort file
+    A silent rule is not a broken rule. It is waiting for a column.
+    """
+    if "submission_rate" not in table.columns:
+        return pd.Series(False, index=table.index)
+    return table["submission_rate"] < 100
 
 
-def to_model_indicators(student):
-    # Builds the nine numbers the model expects.
-    handed_in = 0
-    for part in student["due_so_far"]:
-        if student["marks"].get(part) is not None:
-            handed_in = handed_in + 1
+def scan(table, model):
+    """The whole scan, in the order the system is built on."""
+    found = table.copy()
 
-    return {
-        # the percentage scored on the work assessed so far
-        "early_score": safe_percent(university_rules.mark_so_far(student),
-                                    marks_assessed_so_far(student)),
+    # 1. the regulations, on every row
+    found["rule"] = rule_caught(found)
 
-        # how much of the work that was due was handed in
-        "submission_rate": safe_percent(handed_in, len(student["due_so_far"])),
+    # 2. the model, on the rows no regulation caught. A rule-caught row is
+    #    never put to the model, so its probability stays empty.
+    found["probability"] = np.nan
+    left = ~found["rule"]
+    if left.sum() > 0:
+        chances = model.predict_proba(found.loc[left, INDICATORS])[:, 1]
+        found.loc[left, "probability"] = chances
 
-        # how much of the handed in work arrived after the deadline
-        "late_rate": safe_percent(student["late_submissions"], handed_in),
+    found["model_alert"] = found["probability"] >= settings.ALERT_THRESHOLD
+    found["flagged"] = found["rule"] | found["model_alert"]
 
-        # how many of the term's days so far the course was opened
-        "activity_days_rate": safe_percent(student["active_days"],
-                                           student["day_of_term"]),
+    # 3. how much of the picture each record actually carried
+    counts = []
+    for i in range(len(found)):
+        counts.append(indicators_read(found.iloc[i]))
+    found["indicators_read"] = counts
 
-        # the credit load, converted to the scale the model learned on
-        "studied_credits": student["credits_this_term"] * settings.CREDIT_FACTOR,
-
-        # these three mean the same thing in both places, so no conversion
-        "total_clicks": student["total_clicks"],
-        "longest_gap_days": student["longest_gap_days"],
-        "num_of_prev_attempts": student["previous_attempts"],
-
-        "late_registration": student["days_registered_late"],
-    }
+    return found
 
 
-# The cumulative average and the attendance rate are collected on this
-# screen but are not in the dictionary above, for one reason: the dataset
-# the model learned from has no column for either, so the model was never
-# taught to read them. Both are used by university_rules.py, where they are
-# counted as rules instead of estimated. settings.WAITING_FOR_DATA lists
-# the four steps that switch them on once real data carries them.
+def keep_scan(file_name, contents, found, carried):
+    """Store the file, the run and everything the run flagged.
+
+    The file goes in whole, so it can be scanned again later. The results
+    go in with the reason already written out, so an old scan reads exactly
+    as it read on the day rather than being worked out again.
+    """
+    when = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    file_id = database.save_file(file_name, contents, len(found), when)
+
+    people = found.groupby("id_student")["flagged"].any()
+    rule_people = found[found["rule"]]["id_student"].unique()
+    model_people = found[found["model_alert"]
+                         & ~found["id_student"].isin(rule_people)
+                         ]["id_student"].unique()
+
+    run_id = database.save_run(
+        file_id=file_id, ran_on=when, day_of_term=settings.CUT_DAY,
+        threshold=settings.ALERT_THRESHOLD, students=len(people),
+        records=len(found), flagged=int(people.sum()),
+        by_rule=len(rule_people), by_model=len(model_people),
+        indicators_carried=carried)
+
+    rows = []
+    for i in range(len(found)):
+        row = found.iloc[i]
+        if not row["flagged"]:
+            continue
+        rows.append({
+            "student_id": str(row["id_student"]),
+            "course_code": str(row["code_module"]) + " "
+                           + str(row["code_presentation"]),
+            "caught_by": "rule" if row["rule"] else "model",
+            "reason": (rule_reason(row) if row["rule"]
+                       else say("by_model")),
+            "probability": (None if row["rule"]
+                            else float(row["probability"])),
+            "indicators_read": int(row["indicators_read"]),
+        })
+    database.save_results(run_id, rows)
+
+    return run_id
 
 
-# ---------------------------------------------------------------
-# Small helpers
-# ---------------------------------------------------------------
+def scan_log(found, missing_count):
+    """What the scan did, written out line by line.
 
-def predict(values):
-    one_row = pd.DataFrame([values])
-    return model.predict_proba(one_row[FEATURES])[0][1]
+    Every line is a count taken from the scan that has just run. Nothing
+    here is a fixed string with a number typed into it.
+    """
+    people = found.groupby("id_student")["flagged"].any()
+    rule_rows = int(found["rule"].sum())
+    asked = int((~found["rule"]).sum())
+    model_rows = int(found["model_alert"].sum())
 
+    lines = [
+        ("read " + str(len(found)) + " course records for "
+         + str(found["id_student"].nunique()) + " students"),
+        ("indicators carried by this file: "
+         + str(len(INDICATORS) - missing_count) + " of " + str(len(INDICATORS))),
+        ("regulations applied to all " + str(len(found)) + " records"),
+        ("caught by a regulation: " + str(rule_rows) + " records"),
+        ("put to the model: " + str(asked) + " records"),
+        ("flagged by the model at " + str(settings.ALERT_THRESHOLD) + ": "
+         + str(model_rows) + " records"),
+        ("gathered into " + str(len(people)) + " students"),
+        ("flagged: " + str(int(people.sum())) + "   clear: "
+         + str(int((~people).sum()))),
+    ]
 
-def risk_level(probability):
-    if probability >= settings.HIGH_RISK_THRESHOLD:
-        return "HIGH RISK"
-    if probability >= settings.ALERT_THRESHOLD:
-        return "MEDIUM RISK"
-    return "STABLE"
-
-
-def combined_verdict(policy_status, level):
-    # When the two halves disagree, the rule wins. A rule is something the
-    # university has already decided; the model only offers a probability.
-    if policy_status == "barred":
-        return "error", "Act now. A university rule has already been triggered."
-    if level == "HIGH RISK":
-        return "error", ("Contact the student now. No rule is broken yet, "
-                         "which is why the model matters here.")
-    if policy_status == "warning" or level == "MEDIUM RISK":
-        return "warning", "Keep this student under review."
-    return "success", "No action needed."
-
-
-def explain(values):
-    # Plain language reasons the advisor can repeat to a student without
-    # reading out a probability.
-    reasons = []
-
-    if values["early_score"] < 50:
-        reasons.append("Scored " + str(values["early_score"])
-                       + " percent of the marks assessed so far")
-    if values["submission_rate"] < 100:
-        reasons.append("Handed in only " + str(values["submission_rate"])
-                       + " percent of the work that was due")
-    if values["longest_gap_days"] >= 14:
-        reasons.append("Did not open the course for "
-                       + str(values["longest_gap_days"]) + " days in a row")
-    if values["activity_days_rate"] < 20:
-        reasons.append("Opened the course on only "
-                       + str(values["activity_days_rate"])
-                       + " percent of the days so far")
-    if values["total_clicks"] < 200:
-        reasons.append("Very little activity on the platform, only "
-                       + str(values["total_clicks"]) + " clicks")
-    if values["late_rate"] > 50:
-        reasons.append("Handed in " + str(values["late_rate"])
-                       + " percent of the work after the deadline")
-    if values["num_of_prev_attempts"] > 0:
-        reasons.append("Has taken this course before")
-
-    if len(reasons) == 0:
-        reasons.append("No warning sign in any indicator")
-    return reasons
+    out = ""
+    for line in lines:
+        out = out + '<span class="d">&gt;</span> ' + line + "<br>"
+    return out + '<b>done</b>'
 
 
-def show_table(file_name, caption):
-    # Every result table on the performance tab is shown the same way.
-    try:
-        st.dataframe(pd.read_csv(settings.project_file(file_name)),
-                     width="stretch")
-        if caption != "":
-            st.caption(caption)
-    except Exception:
-        st.info(file_name + " not found")
+def rule_reason(row):
+    """Why a regulation caught this record. Computed from the row itself."""
+    handed_in = row["submission_rate"]
+    not_handed = round(100 - handed_in, 1)
+    if st.session_state["lang"] == "ar":
+        if handed_in == 0:
+            return ("لم يُسلّم شيئاً من العمل المطلوب. العمل غير المسلَّم "
+                    "يُرصد صفراً ما لم يُقدَّم عذر.")
+        return ("سُلِّم " + str(round(handed_in, 1)) + "٪ من العمل المطلوب، "
+                "و" + str(not_handed) + "٪ لم يُسلَّم. غير المسلَّم يُرصد "
+                "صفراً ما لم يُقدَّم عذر.")
+    if handed_in == 0:
+        return ("Nothing was handed in of the work that was due. Work not "
+                "submitted scores zero unless an excuse is filed.")
+    return (str(round(handed_in, 1)) + "% of the work that was due was handed "
+            "in, and " + str(not_handed) + "% was not. What was not handed in "
+            "scores zero unless an excuse is filed.")
+
+
+def model_reasons(row, model, how_many=3):
+    """Which indicators pushed this record towards an alert, and by how much.
+
+    LightGBM gives the push of each indicator in log odds, which is not a
+    number to show anybody. So each push is reported as its share of the
+    total push on this record: a plain statement of which indicators carried
+    the decision, without pretending the units are marks or percentages.
+    """
+    one = row[INDICATORS].to_frame().T.astype(float)
+    pushes = model.predict(one, pred_contrib=True)[0][:len(INDICATORS)]
+
+    total = float(np.sum(np.abs(pushes)))
+    if total == 0:
+        return []
+
+    order = np.argsort(-pushes)       # strongest push towards risk first
+    out = []
+    for i in order[:how_many]:
+        if pushes[i] <= 0:
+            continue
+        out.append({
+            "name": word(INDICATORS[i]),
+            "share": round(abs(pushes[i]) / total * 100, 1),
+            "value": row[INDICATORS[i]],
+        })
+    return out
 
 
 # ---------------------------------------------------------------
 # The page
-# ---------------------------------------------------------------
 
-st.title("Smart Academic Risk Detection System")
-st.caption("Prototype. The prediction is made for one student in one course "
-           "at the middle of the term. It supports the academic advisor, it "
-           "does not replace the advisor's decision.")
+st.set_page_config(page_title="Academic Risk Detection", layout="wide")
 
-tab1, tab2, tab3, tab4 = st.tabs(
-    ["Check a course", "A student's courses", "Model performance", "About"])
+if "lang" not in st.session_state:
+    st.session_state["lang"] = "ar"
+if "sent" not in st.session_state:
+    st.session_state["sent"] = {}
+if "found" not in st.session_state:
+    st.session_state["found"] = None
+if "log" not in st.session_state:
+    st.session_state["log"] = ""
+if "file_now" not in st.session_state:
+    st.session_state["file_now"] = ""
+if "run_id" not in st.session_state:
+    st.session_state["run_id"] = None
+if "stored" not in st.session_state:
+    st.session_state["stored"] = None
+if "stored_when" not in st.session_state:
+    st.session_state["stored_when"] = ""
 
+with st.sidebar:
+    if st.button(say("lang")):
+        st.session_state["lang"] = "en" if st.session_state["lang"] == "ar" else "ar"
+        st.rerun()
 
-# ----- tab 1 : one student in one course -----
-with tab1:
-    # The verdict goes at the top, because that is what the advisor opens
-    # the page to see. Streamlit runs a script from top to bottom, so we
-    # reserve an empty container here and fill it further down, once the
-    # numbers have been read and the model has been asked.
-    verdict_box = st.container()
-
-    st.subheader("What the advisor has in front of them")
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.markdown("**Who and which course**")
-        student_number = st.text_input("University number", "440012345")
-        course_code = st.text_input("Course code", "DS483")
-        program = st.text_input("Program", "Data Science")
-        academic_level = st.number_input("Level", 1, 8, 6)
-
-        st.markdown("**The term**")
-        day_of_term = st.slider("Day of the term today", 1, 110, 60)
-        credits_this_term = st.number_input(
-            "Credits the student is taking this term", 3, 21, 15, step=3)
-        previous_attempts = st.number_input(
-            "Times this course was taken before", 0, 6, 0)
-        days_registered_late = st.number_input("Days late in registering", 0, 60, 0)
-
-        st.markdown("**Held for the rules, not sent to the model**")
-        cumulative_gpa = st.number_input("Cumulative average (out of 4.00)",
-                                         0.0, 4.0, 3.0, step=0.01)
-        st.caption("Collected and shown to the advisor. Not a model input "
-                   "yet, because no dataset we could obtain carries it "
-                   "alongside the other indicators.")
-
-    with col2:
-        st.markdown("**Attendance register, unexcused only**")
-        absence_in_person = st.number_input("In person sessions missed", 0, 20, 0)
-        absence_online = st.number_input("Online sessions missed", 0, 20, 0)
-        st.caption("An absence with an accepted excuse is not counted here. "
-                   "The rule is about unexcused absence, not about an "
-                   "attendance percentage.")
-
-        st.markdown("**Learning platform**")
-        total_clicks = st.number_input("Clicks on the course page", 0, 15000, 400)
-        active_days = st.number_input("Days the course was opened", 0, 110, 20)
-        longest_gap_days = st.slider(
-            "Longest run of days without opening it", 0, 100, 10)
-
-    with col3:
-        st.markdown("**Mark sheet**")
-        st.caption("Untick 'due' for work that has not fallen due yet. Untick "
-                   "'handed in' for work that was due and never arrived, "
-                   "which scores zero unless an excuse is accepted.")
-
-        # The five coursework components as one small editable table. The
-        # names and maximum marks come from settings.py, so the screen can
-        # never drift away from the rules.
-        plan_rows = []
-        for part in settings.COURSEWORK_PLAN:
-            maximum = settings.COURSEWORK_PLAN[part]
-            plan_rows.append({
-                "component": part.replace("_", " "),
-                "out of": maximum,
-                "due": True,
-                "handed in": True,
-                "mark": float(maximum) * 0.75,
-            })
-
-        sheet = st.data_editor(pd.DataFrame(plan_rows), hide_index=True,
-                               width="stretch", disabled=["component", "out of"])
-
-        # Read the table back into the two things the rules need: what has
-        # fallen due, and what was scored on the parts handed in.
-        marks = {}
-        due_so_far = []
-        part_names = list(settings.COURSEWORK_PLAN.keys())
-        for position in range(len(sheet)):
-            part = part_names[position]
-            row = sheet.iloc[position]
-            if row["due"]:
-                due_so_far.append(part)
-                if row["handed in"]:
-                    marks[part] = row["mark"]
-
-        midterm_was_held = st.checkbox("The midterm has been held", value=True)
-        midterm = None
-        if midterm_was_held:
-            sat_the_midterm = st.checkbox("The student sat the midterm", value=True)
-            if sat_the_midterm:
-                midterm = st.number_input(
-                    "Midterm mark (out of " + str(settings.MIDTERM_MAX) + ")",
-                    0.0, float(settings.MIDTERM_MAX), 14.0, step=0.5)
-
-        late_submissions = st.number_input(
-            "How many of those were handed in late", 0, 10, 0)
-
-    student = {
-        "day_of_term": day_of_term,
-        "absence_in_person": absence_in_person,
-        "absence_online": absence_online,
-        "midterm": midterm,
-        "midterm_was_held": midterm_was_held,
-        "marks": marks,
-        "due_so_far": due_so_far,
-        "late_submissions": late_submissions,
-        "active_days": active_days,
-        "total_clicks": total_clicks,
-        "longest_gap_days": longest_gap_days,
-        "previous_attempts": previous_attempts,
-        "credits_this_term": credits_this_term,
-        "days_registered_late": days_registered_late,
-        "cumulative_gpa": cumulative_gpa,
-    }
-
-    summary = university_rules.policy_summary(student)
-    values = to_model_indicators(student)
-    probability = predict(values)
-    level = risk_level(probability)
-    kind, message = combined_verdict(summary["status"], level)
-
-    # Filling the container reserved at the top of the tab.
-    verdict_box.markdown("### What the system says")
-    if kind == "error":
-        verdict_box.error("**" + message + "**")
-    elif kind == "warning":
-        verdict_box.warning("**" + message + "**")
-    else:
-        verdict_box.success("**" + message + "**")
-
-    left, right = verdict_box.columns(2)
-
-    with left:
-        st.subheader("1. University policy")
-        st.caption("Counted directly from the rules. No model involved.")
-
-        a, b = st.columns(2)
-        a.metric("Marks earned so far",
-                 str(round(summary["mark_so_far"], 1)) + " / 100")
-        b.metric("Highest total still reachable",
-                 str(round(summary["highest_possible"], 1)) + " / 100")
-
-        if summary["highest_possible"] < settings.PASS_MARK:
-            st.caption("The pass mark is " + str(settings.PASS_MARK)
-                       + ". This course can no longer be passed.")
-
-        if len(summary["alerts"]) == 0:
-            st.success("No rule is triggered.")
-        else:
-            for alert in summary["alerts"]:
-                line = "**" + alert["rule"] + "** — " + alert["message"]
-                if alert["level"] == "barred":
-                    st.error(line)
-                elif alert["level"] == "warning":
-                    st.warning(line)
-                else:
-                    st.info(line)
-
-    with right:
-        st.subheader("2. Model prediction")
-        st.caption("For the students no rule has caught yet.")
-
-        st.metric("Chance of not passing this course",
-                  str(round(probability * 100, 1)) + " percent")
-
-        if level == "HIGH RISK":
-            st.error(level)
-        elif level == "MEDIUM RISK":
-            st.warning(level)
-        else:
-            st.success(level)
-
-        st.write("**Why the model says this**")
-        for reason in explain(values):
-            st.write("- " + reason)
-
-        with st.expander("What the model actually received"):
-            st.caption("The mark sheet below, converted into the nine "
-                       "indicators the model was trained on.")
-            as_rows = []
-            for name in FEATURES:
-                as_rows.append({"indicator": name, "value": values[name]})
-            st.dataframe(pd.DataFrame(as_rows), hide_index=True, width="stretch")
-
-    # ----- saving the prediction, and what was saved before -----
-    #
-    # One prediction on its own says where a student stands today. A second
-    # one, two weeks later, says which direction they are moving in, and
-    # that is a different conversation for the advisor to have.
-    verdict_box.markdown("---")
-    verdict_box.markdown("### The record for this student")
-
-    save_column, count_column = verdict_box.columns([1, 3])
-
-    if save_column.button("Save this prediction"):
-        database.save_student(student_number, program, academic_level,
-                              credits_this_term)
-        database.save_prediction(
-            student_id=student_number,
-            course_code=course_code,
-            made_on=str(date.today()),
-            day_of_term=day_of_term,
-            mark_so_far=summary["mark_so_far"],
-            highest_possible=summary["highest_possible"],
-            probability=round(probability, 4),
-            risk_level=level,
-            policy_status=summary["status"],
-        )
-        save_column.success("Saved.")
-
-    count_column.caption("The database holds "
-                         + str(database.count_predictions())
-                         + " saved predictions for "
-                         + str(database.count_students()) + " students. "
-                         + "No names, no identity numbers and no contact "
-                         + "details are stored, only the university number "
-                         + "and the result of the calculation.")
-
-    history = database.get_history(student_number)
-    if len(history) == 0:
-        verdict_box.caption("Nothing saved for this student yet.")
-    else:
-        verdict_box.dataframe(history, hide_index=True, width="stretch")
-
-    verdict_box.divider()
-
-
-# ----- tab 2 : one student across all their courses -----
-with tab2:
-    st.subheader("One student, every course")
-    st.markdown(
-        "The system predicts **one course at a time** and then gathers the "
-        "courses back together. This matters: a student with a good average "
-        "can still be collapsing in a single course, and an average taken "
-        "across the student would hide exactly the case we are trying to catch."
-    )
-
-    chosen_set = st.radio("Which set of students",
-                          settings.DEMO_SETS,
-                          format_func=lambda name: DEMO_LABELS[name],
-                          horizontal=True)
-    demo = demo_sets[chosen_set]
-    st.caption(str(demo["id_student"].nunique()) + " students, "
-               + str(len(demo)) + " courses between them. None of them is in "
-               + "the training set, the validation set or the test set, and "
-               + "no student appears in more than one of the three sets.")
-
-    # Students carrying several courses are listed first, because they are
-    # the ones that show what this screen is for.
-    course_counts = demo.groupby("id_student").size().sort_values(ascending=False)
-
-    labels = []
-    id_for_label = {}
-    for student_id in course_counts.index:
-        count = course_counts[student_id]
-        if count == 1:
-            label = str(student_id) + "  (1 course)"
-        else:
-            label = str(student_id) + "  (" + str(count) + " courses)"
-        labels.append(label)
-        id_for_label[label] = student_id
-
-    chosen_label = st.selectbox("Student number", labels)
-    courses = demo[demo["id_student"] == id_for_label[chosen_label]]
-
-    rows = []
-    for position in range(len(courses)):
-        course = courses.iloc[position]
-
-        course_values = {}
-        for name in FEATURES:
-            course_values[name] = course[name]
-        course_probability = predict(course_values)
-
-        if course["at_risk"] == 1:
-            what_happened = "did not pass"
-        else:
-            what_happened = "passed"
-
-        rows.append({
-            "Course": course["code_module"],
-            "Term": course["code_presentation"],
-            "Chance of not passing": round(course_probability * 100, 1),
-            "Risk": risk_level(course_probability),
-            "Marks so far (%)": round(course["early_score"], 1),
-            "Work handed in (%)": round(course["submission_rate"], 1),
-            "Longest gap (days)": int(course["longest_gap_days"]),
-            "What happened": what_happened,
-        })
-
-    table = pd.DataFrame(rows).sort_values("Chance of not passing", ascending=False)
-    worst = table["Chance of not passing"].max()
-    worst_level = risk_level(worst / 100)
-
-    if worst_level == "HIGH RISK":
-        st.error("**This student needs contacting.** The worst course is at "
-                 + str(worst) + " percent.")
-    elif worst_level == "MEDIUM RISK":
-        st.warning("**Keep this student under review.** The worst course is at "
-                   + str(worst) + " percent.")
-    else:
-        st.success("**No course is a concern.** The worst is at "
-                   + str(worst) + " percent.")
-
-    st.dataframe(table, width="stretch", hide_index=True)
-    st.caption("This student was kept out of the training set, the validation "
-               "set and the test set, so the model has never seen them and "
-               "their result is not part of any figure on the next tab. The "
-               "last column is what really happened, shown so the prediction "
-               "can be judged honestly rather than taken on trust.")
-
-
-# ----- tab 3 : the results -----
-with tab3:
-    st.subheader("Which dataset the system was built on")
-    show_table("results_dataset_comparison.csv",
-               "The same model, same settings and same seed, trained on three "
-               "universities. Valencia has attendance taken from campus wifi "
-               "and the previous year's performance, but no coursework mark "
-               "before the exam, and its recall collapses to 0.30. The other "
-               "two both have such a mark and both reach 0.69. That is the "
-               "evidence for predicting after the midterm.")
-
-    st.subheader("How the four algorithms compared")
-    show_table("results_model_comparison.csv", "")
-
-    st.subheader("Choosing the alert threshold")
-    show_table("results_threshold_table.csv",
-               "We chose " + str(settings.ALERT_THRESHOLD) + ". Missing a "
-               "student costs that student a term. A false alarm costs the "
-               "advisor a phone call. The two are not worth the same, so the "
-               "threshold is not left at the usual 0.50.")
-
-    st.subheader("Is it fair across groups")
-    show_table("results_fairness.csv",
-               "None of these three attributes is given to the model. They are "
-               "used only to audit it afterwards. Recall holds between 0.771 "
-               "and 0.829 across every group. Precision does not: 0.596 for "
-               "female students against 0.696 for male students, which means "
-               "proportionally more unnecessary calls to one group. We report "
-               "it rather than hide it.")
-
-    st.subheader("Which indicators matter most")
-    try:
-        importance = pd.read_csv(
-            settings.project_file("results_feature_importance.csv"))
-        chart_data = importance.set_index("Feature")
-        st.bar_chart(chart_data["Share_%"])
-        st.caption("Behaviour on the platform carries more of the decision "
-                   "than the early mark does.")
-    except Exception:
-        st.info("results_feature_importance.csv not found")
-
-
-# ----- tab 4 -----
-with tab4:
+if st.session_state["lang"] == "ar":
+    # Arabic reads right to left, so the writing is turned round. The tables
+    # are left alone on purpose: a table of student numbers and percentages
+    # is read left to right in both languages, and turning the grid round
+    # pushes its first column off the edge of the screen.
     st.markdown("""
-**What this system does**
+        <style>
+        .stApp p, .stApp label, .stApp h1, .stApp h2, .stApp h3,
+        .stApp li, .stApp .stMarkdown, .stApp .stCaption {
+            direction: rtl; text-align: right;
+        }
+        .stApp [data-testid="stDataFrame"],
+        .stApp [data-testid="stDataFrame"] * {
+            direction: ltr; text-align: left;
+        }
+        .stApp [data-testid="stMetricValue"] { direction: ltr; }
+        </style>
+    """, unsafe_allow_html=True)
 
-It looks at one student in one course at the middle of the term and estimates
-whether that student is heading towards not passing, while there is still
-time to do something about it. The academic advisor decides what to do.
+st.markdown(STYLE, unsafe_allow_html=True)
 
-**Why there are two halves**
 
-Some things are rules, not predictions. Four unexcused absences means the
-student is barred from the course. Needing more than the remaining marks to
-reach 60 means the course is already lost. Neither is a probability and
-neither needs a model, so the policy engine simply counts them.
+@st.cache_data
+def logo_tag():
+    """The university's mark, read from the file and put straight into the
+    page. It is kept as a file rather than pasted into the code so the
+    university's own artwork is not edited by us."""
+    import base64
+    try:
+        raw = open(settings.project_file("university_logo.svg"), "rb").read()
+        encoded = base64.b64encode(raw).decode()
+        return '<img src="data:image/svg+xml;base64,' + encoded + '" alt="">'
+    except FileNotFoundError:
+        return ""
 
-The model is for the rest: the student no rule has caught yet, whose marks
-are still passable, but whose pattern looks like the students who did not
-pass.
 
-**Where the attendance rule and the cumulative average sit**
+# The bar carries the university's mark and nothing else. An earlier
+# version put an account name and initials beside it, copied from the
+# mock up. There is no sign in and there are no user accounts in this
+# system, so showing one would be claiming something that is not there.
+st.markdown('<div class="nav"><span class="logo">' + logo_tag()
+            + '</span></div>', unsafe_allow_html=True)
 
-In the policy engine, and not yet in the model. Not because they were
-rejected: no dataset we could obtain carries either column alongside the
-rest, so the model was never taught to read them, and handing a trained
-model a number it has never seen produces noise rather than a prediction.
-Both are collected on this screen and both are applied as rules, which is
-how the university applies them anyway. The design keeps a named slot for
-each, and switching them on is four steps and a retrain.
+st.markdown(
+    '<div class="hero">'
+    '<div class="kick">' + ("الجامعة · لجنة الإشراف الأكاديمي"
+                            if st.session_state["lang"] == "ar"
+                            else "University · Academic Supervision Committee")
+    + '</div><h1>' + say("title") + '</h1>'
+    '<div class="lede">' + say("subtitle") + '</div></div>',
+    unsafe_allow_html=True)
 
-**Data**
+model = load_model()
+database.create_tables()
 
-Open University Learning Analytics Dataset, Kuzilek, Hlosta and Zdrahal,
-Scientific Data 4, 170171, 2017, licence CC-BY 4.0. Two further datasets,
-from UPV Valencia and from the University of KwaZulu-Natal, were used to
-test the same model and are reported on the Model performance tab.
+tab_scan, tab_register, tab_evidence = st.tabs(
+    [say("tab_scan"), say("tab_register"), say("tab_evidence")])
 
-**What is still an assumption**
 
-The credit load conversion: we treat a full load here as the same pressure
-as a full load at the Open University. Reasonable, not proven, and the
-first thing to check against real data from our own university.
+# ---------------------------------------------------------------
+with tab_scan:
+    source = st.radio(say("source"), [say("src_file"), say("src_db")],
+                      horizontal=True, label_visibility="collapsed")
 
-**The limit nobody should forget**
+    # The two sources drawn as cards, the way the simulation drew them. The
+    # radio above is what Streamlit listens to; these show which one is on.
+    on_file = source == say("src_file")
+    st.markdown(
+        '<div class="src ' + ("on" if on_file else "") + '">'
+        '<span class="rd"></span><span><span class="t1">' + say("src_file")
+        + '</span><br><span class="t2">' + say("src_file_sub") + '</span></span>'
+        '<span class="rt">' + say("ready") + '</span></div>'
+        '<div class="src off ' + ("on" if not on_file else "") + '">'
+        '<span class="rd"></span><span><span class="t1">' + say("src_db")
+        + '</span><br><span class="t2">' + say("src_db_sub") + '</span></span>'
+        '<span class="rt">' + say("not_ready") + '</span></div>',
+        unsafe_allow_html=True)
 
-This has never been tested on data from our own university, because we were
-not given any.
-    """)
+    if not on_file:
+        st.info(say("db_closed"))
+
+    else:
+        handed = st.file_uploader(say("upload"), type=["csv"])
+
+        # Streamlit's uploader takes a dropped file as well as a chosen one,
+        # but says so only in English and only on the button. This line says
+        # it in the language the rest of the screen is in.
+        st.caption(say("drag"))
+
+        if handed is None:
+            st.caption(say("no_file"))
+        else:
+            contents = handed.getvalue().decode("utf-8")
+
+            # A different file than last time clears the screen straight
+            # away. Otherwise the name at the top would say one file while
+            # the register underneath still showed another one's students.
+            if st.session_state["file_now"] != handed.name + contents[:200]:
+                st.session_state["file_now"] = handed.name + contents[:200]
+                st.session_state["found"] = None
+                st.session_state["log"] = ""
+                st.session_state["sent"] = {}
+
+            table, missing = read_cohort(io.StringIO(contents))
+            carried = len(INDICATORS) - len(missing)
+
+            # Is this file already here? The answer comes from its contents,
+            # not its name.
+            already = database.find_file(contents)
+            newer_than = database.other_versions(handed.name, contents)
+
+            if already is not None:
+                st.info(say("file_known",
+                            when=str(already["uploaded_on"]),
+                            rows=int(already["rows_in_file"])))
+            elif len(newer_than) > 0:
+                st.warning(say("file_updated", n=len(newer_than)))
+
+            st.write("**" + say("cols_read") + ":** "
+                     + str(carried) + " / " + str(len(INDICATORS)))
+            if len(missing) > 0:
+                st.warning(say("cols_missing") + ": "
+                           + ", ".join([word(n) for n in missing]))
+
+            if st.button(say("run"), type="primary"):
+                with st.spinner(say("scanning")):
+                    found = scan(table, model)
+                    st.session_state["found"] = found
+                    st.session_state["log"] = scan_log(found, len(missing))
+                    st.session_state["run_id"] = keep_scan(
+                        handed.name, contents, found, carried)
+                st.rerun()
+
+    found = st.session_state["found"]
+    if found is not None:
+        people = found.groupby("id_student")["flagged"].any()
+        rule_people = found[found["rule"]]["id_student"].unique()
+        model_people = found[found["model_alert"]
+                             & ~found["id_student"].isin(rule_people)
+                             ]["id_student"].unique()
+
+        # the five steps, all of them done by the time this is drawn
+        steps = ""
+        for number, key in enumerate(["step1", "step2", "step3", "step4",
+                                      "step5"], start=1):
+            steps = steps + ('<div class="sp2 done"><span class="dot">'
+                             + str(number) + '</span>'
+                             '<span class="tx">' + say(key) + '</span></div>')
+        st.markdown('<div class="steps">' + steps + '</div>',
+                    unsafe_allow_html=True)
+
+        st.markdown('<div class="log">' + st.session_state["log"] + '</div>',
+                    unsafe_allow_html=True)
+
+        st.markdown(
+            '<div class="split">'
+            + tile(len(people), say("students"), "")
+            + tile(int(people.sum()), say("flagged"), "o")
+            + tile(len(rule_people), say("by_rule"), "r")
+            + tile(len(model_people), say("by_model"), "o")
+            + tile(int((~people).sum()), say("clear"), "g")
+            + '</div>', unsafe_allow_html=True)
+        st.caption(str(len(found)) + " " + say("rows"))
+
+        # What the regulations could and could not reach in this file. Each
+        # line is the rule's own answer, not a claim made on its behalf.
+        st.divider()
+        st.subheader(say("rules_state"))
+        st.dataframe(pd.DataFrame([
+            {say("rule_name"): "work not handed in",
+             say("rule_needs"): "submission_rate",
+             say("rule_says"): say("speaks") + " — " + str(len(rule_people))
+                               + " " + say("students")},
+            {say("rule_name"): "marks still reachable",
+             say("rule_needs"): "assessment weights",
+             say("rule_says"): say("silent_ok")},
+            {say("rule_name"): "withdrawal window",
+             say("rule_needs"): "exam_day",
+             say("rule_says"): say("silent")},
+            {say("rule_name"): "absence",
+             say("rule_needs"): "absence count",
+             say("rule_says"): say("silent")},
+        ]), hide_index=True, width="stretch")
+
+    # Everything scanned so far, so any earlier cohort can be opened again
+    # or put through the system a second time.
+    st.divider()
+    st.subheader(say("stored"))
+
+    runs = database.get_runs()
+    if len(runs) == 0:
+        st.caption(say("no_stored"))
+    else:
+        shelf = pd.DataFrame({
+            say("src_file"): runs["file_name"],
+            say("pick_run"): runs["ran_on"],
+            say("students"): runs["students"],
+            say("flagged"): runs["flagged"],
+            say("by_rule"): runs["by_rule"],
+            say("by_model"): runs["by_model"],
+            say("cols_read"): runs["indicators_carried"],
+        })
+        chosen_run = st.dataframe(shelf, hide_index=True, width="stretch",
+                                  on_select="rerun",
+                                  selection_mode="single-row",
+                                  key="runs_table")
+
+        picked_rows = chosen_run["selection"]["rows"]
+        if len(picked_rows) > 0:
+            run = runs.iloc[picked_rows[0]]
+            open_it, scan_again = st.columns(2)
+
+            if open_it.button(say("open_run"), key="open_run"):
+                st.session_state["stored"] = database.get_results(
+                    int(run["run_id"]))
+                st.session_state["stored_when"] = str(run["ran_on"])
+                st.session_state["found"] = None
+                st.rerun()
+
+            if scan_again.button(say("rescan"), key="rescan"):
+                contents = database.get_file_contents(int(run["file_id"]))
+                table, missing = read_cohort(io.StringIO(contents))
+                with st.spinner(say("scanning")):
+                    found = scan(table, model)
+                    st.session_state["found"] = found
+                    st.session_state["stored"] = None
+                    st.session_state["log"] = scan_log(found, len(missing))
+                    st.session_state["run_id"] = keep_scan(
+                        str(run["file_name"]), contents, found,
+                        len(INDICATORS) - len(missing))
+                st.rerun()
+
+
+# ---------------------------------------------------------------
+with tab_register:
+    found = st.session_state["found"]
+    stored = st.session_state["stored"]
+
+    if found is None and stored is not None:
+        # A result opened from the database. It is read back exactly as it
+        # was written, so there is no model here and nothing is worked out
+        # again: these are the sentences the system gave on the day.
+        st.info(say("from_store", when=st.session_state["stored_when"]))
+
+        # A student belongs to one block, not two. If any one of his course
+        # records was caught by a regulation, that is why the committee is
+        # looking at him, even where another of his courses was flagged by
+        # the model instead. This is the same order the live register uses,
+        # and the two have to agree or the same scan reads two ways.
+        rule_students = stored[stored["caught_by"] == "rule"]["student_id"]
+
+        for kind, heading in [("rule", say("rule_block")),
+                              ("model", say("model_block"))]:
+            if kind == "rule":
+                part = stored[stored["student_id"].isin(rule_students)]
+            else:
+                part = stored[~stored["student_id"].isin(rule_students)]
+            if len(part) == 0:
+                continue
+            st.markdown('<div class="blockhead">' + heading
+                        + ' <span class="sm">· '
+                        + str(part["student_id"].nunique()) + " "
+                        + say("students") + '</span></div>',
+                        unsafe_allow_html=True)
+            shown = pd.DataFrame({
+                say("student"): part["student_id"].values,
+                say("courses"): part["course_code"].values,
+                say("why"): part["reason"].values,
+                say("prob"): part["probability"].values,
+                say("cols_read"): part["indicators_read"].values,
+            })
+            st.dataframe(shown, hide_index=True, width="stretch")
+
+    elif found is None:
+        st.caption(say("no_file"))
+    else:
+        rule_people = found[found["rule"]]["id_student"].unique()
+        model_people = found[found["model_alert"]
+                             & ~found["id_student"].isin(rule_people)
+                             ]["id_student"].unique()
+
+        # Which block to show, and a search box. With 155 students on the
+        # register, an advisor looking for one of them needs both.
+        left, right = st.columns([2, 3])
+        with left:
+            which = st.radio(
+                say("source"),
+                [say("chip_all"), say("by_rule"), say("by_model")],
+                horizontal=True, label_visibility="collapsed")
+        with right:
+            looking_for = st.text_input(say("search"), "",
+                                        label_visibility="collapsed",
+                                        placeholder=say("search"))
+
+        blocks = []
+        if which in (say("chip_all"), say("by_rule")):
+            blocks.append(("rule", rule_people, say("rule_block")))
+        if which in (say("chip_all"), say("by_model")):
+            blocks.append(("model", model_people, say("model_block")))
+
+        picked = None
+        for kind, people, heading in blocks:
+            shown = [w for w in people
+                     if looking_for.strip() == ""
+                     or looking_for.strip() in str(w)]
+            if len(shown) == 0:
+                continue
+
+            st.markdown('<div class="blockhead">' + heading
+                        + ' <span class="sm">· ' + str(len(shown)) + " "
+                        + say("students") + '</span></div>',
+                        unsafe_allow_html=True)
+
+            table = register_rows(shown, found, kind)
+            chosen = st.dataframe(
+                table, hide_index=True, width="stretch",
+                on_select="rerun", selection_mode="single-row",
+                key="reg_" + kind)
+
+            rows_picked = chosen["selection"]["rows"]
+            if len(rows_picked) > 0:
+                picked = shown[rows_picked[0]]
+
+        if picked is None and looking_for.strip() != "":
+            everyone = list(rule_people) + list(model_people)
+            if not any(looking_for.strip() in str(w) for w in everyone):
+                st.caption(say("nobody"))
+
+        st.caption(say("click_row"))
+
+        # One student, opened.
+        if picked is not None:
+            who = picked
+            mine = found[found["id_student"] == who]
+
+            st.markdown('<div class="crumb">' + say("back") + " › <b>"
+                        + say("student") + " " + str(who) + "</b></div>",
+                        unsafe_allow_html=True)
+
+            for i in range(len(mine)):
+                row = mine.iloc[i]
+                if not row["flagged"]:
+                    continue
+
+                inside = ""
+                if row["rule"]:
+                    inside = ('<p class="why">' + rule_reason(row) + '</p>'
+                              '<p class="note">' + say("no_prob") + '</p>')
+                else:
+                    inside = ('<p class="why">' + say("prob") + ": <b>"
+                              + str(round(float(row["probability"]), 4))
+                              + "</b></p>")
+                    for push in model_reasons(row, model):
+                        value = push["value"]
+                        shown = "—" if pd.isna(value) else str(round(float(value), 2))
+                        inside = inside + (
+                            '<div class="push"><span>' + push["name"] + '</span>'
+                            '<span class="v">' + shown + '</span>'
+                            '<span class="s">' + str(push["share"]) + '%</span>'
+                            '</div>')
+
+                st.markdown(
+                    '<div class="box">'
+                    '<h3>' + str(row["code_module"]) + " "
+                    + str(row["code_presentation"]) + '</h3>'
+                    '<div class="cap">'
+                    + say("read_n", n=int(row["indicators_read"]),
+                          total=len(INDICATORS))
+                    + ' · <span class="tag '
+                    + ("r" if row["rule"] else "o") + '">'
+                    + (say("by_rule") if row["rule"] else say("by_model"))
+                    + '</span></div>' + inside + '</div>',
+                    unsafe_allow_html=True)
+
+            if who in st.session_state["sent"]:
+                st.success(say("sent_at") + ": " + st.session_state["sent"][who])
+            else:
+                if st.button(say("send"), key="send_" + str(who), type="primary"):
+                    when = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                    st.session_state["sent"][who] = when
+                    for i in range(len(mine)):
+                        row = mine.iloc[i]
+                        if not row["flagged"]:
+                            continue
+                        database.save_notice(
+                            student_id=str(who),
+                            course_code=str(row["code_module"]) + " "
+                                        + str(row["code_presentation"]),
+                            made_on=when,
+                            day_of_term=settings.CUT_DAY,
+                            caught_by="rule" if row["rule"] else "model",
+                            reason=(rule_reason(row) if row["rule"]
+                                    else "model, p="
+                                         + str(round(float(row["probability"]), 4))),
+                            probability=(None if row["rule"]
+                                         else float(row["probability"])),
+                            indicators_read=int(row["indicators_read"]),
+                            state="sent")
+                    st.rerun()
+            st.caption(say("stop_note"))
+
+
+# ---------------------------------------------------------------
+with tab_evidence:
+    def show(file_name, caption):
+        try:
+            st.caption(caption)
+            st.dataframe(pd.read_csv(settings.project_file(file_name)),
+                         hide_index=True, width="stretch")
+        except FileNotFoundError:
+            st.caption(caption + " — " + file_name)
+
+    show("results_final.csv", say("ev_test"))
+    show("results_rule_vs_model.csv", say("ev_rule"))
+    show("results_indicator_groups.csv", say("ev_groups"))
+    show("results_threshold_table.csv", say("ev_thresh"))
+    show("results_model_comparison.csv", say("ev_models"))
+
+    st.divider()
+    st.caption(say("ev_fair_note"))
+    show("results_fairness.csv", say("ev_fair"))
+
+    st.divider()
+    show("results_feature_importance.csv", say("ev_weight"))

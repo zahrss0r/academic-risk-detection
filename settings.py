@@ -55,12 +55,21 @@ PASS_MARK = 60            # out of 100, below this is a fail
 MAX_ABSENCE_IN_PERSON = 4   # unexcused, per course
 MAX_ABSENCE_ONLINE = 4      # unexcused, per course
 
-# The last day a student may still file an excuse or withdraw. It runs from
-# the first day of term until just before the final exams, about three
-# months.
-WINDOW_LAST_DAY = 90
+# A student may file an excuse or withdraw from the first day of term until
+# two weeks before the final exam of that course.
+#
+# This used to be written here as a fixed day of term, day 90, which was
+# wrong twice over. It is not our university's rule, and it cannot be a
+# fixed day at all: every course sits its final on its own date, so the
+# window closes on a different day in every course.
+#
+# So the rule needs the date of that course's final. Where a dataset
+# carries it, the rule works out the closing day and says how long is left.
+# Where it does not, the rule says nothing. It is not disabled and it is not
+# guessed; it waits for the one fact it needs.
+WINDOW_NOTICE_DAYS = 14     # the window shuts this long before the final
 
-# Warn this many days before that window closes.
+# Warn when the window is about to close within this many days.
 WINDOW_WARNING_DAYS = 14
 
 # Warn when the highest total the student can still reach is below this.
@@ -90,11 +99,11 @@ CUT_DAY = 100
 # the same size and drawn the same way, so any one of them can stand in for
 # any other.
 #
-# 300 each. At that size roughly 137 of the students shown will genuinely
-# be at risk, which keeps the recall seen live on screen within about three
-# and a half points of the figure reported in the report. At 200 it swings
-# by four points or more, which invites an awkward question about why the
-# screen and the report disagree.
+# 300 each. At that size about 116 of the students shown will genuinely be
+# at risk — 117, 114 and 118 in the three sets as drawn — which keeps the
+# recall seen live on screen within roughly four points of the figure in the
+# report. At 200 students it swings by five points or more, which invites an
+# awkward question about why the screen and the report disagree.
 DEMO_STUDENTS_PER_SET = 300
 DEMO_SETS = ["supervisor", "final", "backup"]
 
@@ -102,19 +111,60 @@ DEMO_SETS = ["supervisor", "final", "backup"]
 # student costs that student a term, a false alarm costs a phone call, so
 # the two mistakes are not worth the same. See results_threshold_table.csv.
 ALERT_THRESHOLD = 0.30
-HIGH_RISK_THRESHOLD = 0.65
 
-# The nine indicators the model is trained on, in the order it expects them.
+# There is one threshold and no bands above it. An earlier version sorted
+# students into high, medium and stable on a second threshold of 0.65. That
+# was dropped: a band is a judgement the system is not entitled to make, and
+# the advisor was being handed three words where the honest answer is one
+# line - this student was flagged, and here is why.
+
+# The eleven indicators the model is trained on, in the order it expects
+# them. Two of them, the ones ending in _missing, are not measurements. Each
+# says whether the indicator beside it was left empty, because two of the
+# indicators are a division and a division has no answer when the bottom
+# half is zero. Leaving the cell empty and recording that we left it empty
+# keeps a fact that writing a number would have hidden: a student who handed
+# in nothing has no lateness to measure, and he is not the same student as
+# one who handed everything in on time.
 MODEL_INDICATORS = [
     "early_score",
+    "early_score_missing",
     "submission_rate",
     "late_rate",
+    "late_rate_missing",
     "total_clicks",
     "activity_days_rate",
     "longest_gap_days",
     "num_of_prev_attempts",
     "studied_credits",
     "late_registration",
+]
+
+# The same indicators split into the groups the ablation experiment compares,
+# plus the group we refuse. Training on the first group tells us what we gave
+# up by refusing it, which turns a principle into a number we can report.
+GROUP_DEMOGRAPHIC = [
+    "gender",
+    "region",
+    "age_band",
+    "imd_band",
+    "highest_education",
+    "disability",
+]
+GROUP_ACADEMIC = [
+    "early_score",
+    "early_score_missing",
+    "submission_rate",
+    "num_of_prev_attempts",
+    "studied_credits",
+    "late_registration",
+]
+GROUP_BEHAVIOURAL = [
+    "late_rate",
+    "late_rate_missing",
+    "total_clicks",
+    "activity_days_rate",
+    "longest_gap_days",
 ]
 
 # Kept in the processed files so we can check the model afterwards, and
@@ -137,8 +187,12 @@ AUDIT_ONLY_COLUMNS = [
 # read them, and handing a trained model a number it has never seen gives
 # noise instead of a prediction.
 #
-# Both are collected by the interface and both are applied as rules in
-# university_rules.py, which is how the university applies them anyway.
+# Neither has a rule of its own in university_rules.py yet. The cumulative
+# average is collected by the interface and shown to the advisor, and nothing
+# in the code reads it. Attendance is not collected at all: check_absence
+# counts sessions missed, which is a different quantity from the percentage
+# attended, and that rule is silent here because this data has no absence
+# column. Saying either of them is "applied as a rule" would not be true.
 #
 # WHEN DATA ARRIVES THAT CONTAINS THEM:
 #   1. move the two names from here into MODEL_INDICATORS above

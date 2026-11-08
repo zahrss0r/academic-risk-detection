@@ -1,0 +1,5 @@
+What the model could see,Columns,Recall,Precision,F1,ROC_AUC,PR_AUC,Flagged,Flagged_%,Caught,Missed,False_alarms,Fold_spread,Note
+who the student is,34,0.8113,0.4188,0.5524,0.6082,0.4868,2813,74.4,1178,274,1635,0.0123,"refused by the system, trained here only to price the refusal"
+what the record says,6,0.7424,0.6502,0.6932,0.8302,0.8006,1658,43.8,1078,374,580,0.0163,what any registry already holds
+what the student does,5,0.7672,0.5578,0.646,0.7773,0.7253,1997,52.8,1114,338,883,0.0135,needs a platform that watches
+the record and the doing,11,0.7803,0.6387,0.7024,0.8538,0.8226,1774,46.9,1133,319,641,0.012,the system as built
