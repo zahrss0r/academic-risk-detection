@@ -274,37 +274,89 @@ def cohort_row_summary(row):
 
     # Rule: unexcused absence.
     #
-    # Silent here, and silent for a reason that is worth stating plainly:
-    # the published data this system was built on has no absence column at
-    # all. The rule is written and tested in test_system.py; it is waiting
-    # for a column, not broken.
-    if row.get("absence_in_person") is None:
+    # The published data this system was built on has no absence column, so
+    # on that data this rule says so and stops. A university file that does
+    # carry one gets the rule applied, at the same limits the full engine
+    # uses. It was written here as the silent branch only, which meant a
+    # file with an absence column was told the rule could not be applied
+    # while the column sat right there in it.
+    missed = row.get("absence_in_person")
+    if missed is None or missed != missed:                 # None, or NaN
         alerts.append(make_alert(
             "absence unknown", "information",
             "This file carries no record of absence, so the absence rule "
             "cannot be applied."))
+    elif missed >= settings.MAX_ABSENCE_IN_PERSON:
+        alerts.append(make_alert(
+            "absence in person", "barred",
+            "Barred from the course. " + str(int(missed))
+            + " unexcused absences, the limit is "
+            + str(settings.MAX_ABSENCE_IN_PERSON) + "."))
+    elif missed == settings.MAX_ABSENCE_IN_PERSON - 1:
+        alerts.append(make_alert(
+            "absence in person", "warning",
+            "One absence away from being barred. " + str(int(missed))
+            + " of " + str(settings.MAX_ABSENCE_IN_PERSON) + "."))
 
     # Rule: the highest mark still reachable.
     #
-    # This one needs the weight of every assessment in the course and the
-    # marks earned so far, component by component. A cohort file carries a
-    # single averaged early mark instead, so the ceiling cannot be worked
-    # out from it and the rule stays silent rather than guess at one.
-    if row.get("due_so_far") is None:
+    # Needs two things: how much of the course has been assessed so far,
+    # as a share of the final mark, and what the student scored on it. A
+    # cohort file that carries due_so_far has the first; early_score is
+    # the second. Everything not yet assessed is counted as if the student
+    # scored full marks on it, which is what "still reachable" means.
+    due = row.get("due_so_far")
+    got = row.get("early_score")
+    if (due is None or due != due) or (got is None or got != got):
         alerts.append(make_alert(
             "ceiling unknown", "information",
             "This file does not carry the weight of each assessment, so "
             "the highest mark still reachable cannot be worked out."))
+    else:
+        earned = float(got) / 100.0 * float(due)
+        highest = earned + (100.0 - float(due))
+        if highest < settings.PASS_MARK:
+            alerts.append(make_alert(
+                "cannot reach the pass mark", "barred",
+                "Cannot pass. The highest total still reachable is "
+                + str(round(highest, 1)) + " and the pass mark is "
+                + str(settings.PASS_MARK) + "."))
+        elif highest < settings.TIGHT_MARGIN:
+            alerts.append(make_alert(
+                "very little margin left", "warning",
+                "Only " + str(round(highest - settings.PASS_MARK, 1))
+                + " marks of margin above the pass mark. Near perfect "
+                "scores are needed on everything that is left."))
 
     # Rule: the excuse and withdrawal window.
     #
-    # Needs the date of that course's final exam, which a cohort file does
-    # not carry either.
-    if row.get("exam_day") is None:
+    # Needs the date of that course's final exam. The system never advises
+    # a student to withdraw; it says how much time is left, because an
+    # alert that arrives after the window has shut is of no use to anyone.
+    exam_day = row.get("exam_day")
+    if exam_day is None or exam_day != exam_day:
         alerts.append(make_alert(
             "window unknown", "information",
             "The date of the final exam is not in this file, so the "
             "withdrawal window cannot be worked out."))
+    else:
+        closes_on = int(exam_day) - settings.WINDOW_NOTICE_DAYS
+        days_left = closes_on - settings.CUT_DAY
+        if days_left <= 0:
+            alerts.append(make_alert(
+                "window closed", "information",
+                "The window for filing an excuse or withdrawing closed on "
+                "day " + str(closes_on) + "."))
+        elif days_left <= settings.WINDOW_WARNING_DAYS:
+            alerts.append(make_alert(
+                "window closing", "warning",
+                str(days_left) + " days left to file an excuse or withdraw. "
+                "The window shuts on day " + str(closes_on) + "."))
+        else:
+            alerts.append(make_alert(
+                "window open", "information",
+                str(days_left) + " days left to file an excuse or withdraw. "
+                "The window shuts on day " + str(closes_on) + "."))
 
     status = "clear"
     for alert in alerts:
@@ -314,6 +366,23 @@ def cohort_row_summary(row):
             status = "warning"
 
     return {"status": status, "alerts": alerts}
+
+
+def columns_the_rules_need():
+    """Which column each regulation reads, named once, here.
+
+    The interface has to tell an advisor which regulations can work on
+    the file they just uploaded. It could look for these column names
+    itself, but then the same knowledge would live in two files and one
+    of them would fall behind the other the first time a rule changed.
+    The regulations say what they need; nobody else gets to guess.
+    """
+    return [
+        {"rule": "work not handed in", "column": "submission_rate"},
+        {"rule": "absence", "column": "absence_in_person"},
+        {"rule": "marks still reachable", "column": "due_so_far"},
+        {"rule": "the withdrawal window", "column": "exam_day"},
+    ]
 
 
 def what_the_rules_can_reach(row):

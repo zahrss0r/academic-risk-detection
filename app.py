@@ -42,6 +42,14 @@ INDICATORS = settings.MODEL_INDICATORS
 
 # Plain words for each indicator, in both languages. The model's column names
 # are for the code; these are what a person reads.
+RULE_WORDS = {
+    "work not handed in":    ("العمل غير المسلَّم", "work not handed in"),
+    "absence":               ("الغياب", "absence"),
+    "marks still reachable": ("الدرجة القصوى الممكنة",
+                              "marks still reachable"),
+    "the withdrawal window": ("نافذة الانسحاب", "the withdrawal window"),
+}
+
 WORDS = {
     "early_score":          ("الدرجة المكتسبة حتى الآن", "marks earned so far"),
     "early_score_missing":  ("لا توجد درجة مرصودة", "no mark recorded yet"),
@@ -54,6 +62,9 @@ WORDS = {
     "num_of_prev_attempts": ("محاولات سابقة في المقرر", "previous attempts"),
     "studied_credits":      ("الساعات المسجلة", "credits registered"),
     "late_registration":    ("تسجيل متأخر", "registered late"),
+    "id_student":           ("رقم الطالب", "student number"),
+    "code_module":          ("رمز المقرر", "course code"),
+    "code_presentation":    ("الفصل الدراسي", "term"),
 }
 
 TEXT = {
@@ -78,10 +89,26 @@ TEXT = {
     "scanning":     ("جاري الفحص", "Scanning"),
     "cols_read":    ("المؤشرات التي يحملها الملف",
                      "Indicators this file carries"),
-    "cols_missing": ("أعمدة غير موجودة في الملف، والنموذج أُبلغ أنها مجهولة "
-                     "ولم تُعطَ صفراً",
-                     "Columns this file does not carry. The model was told "
-                     "they are unknown, not given a zero."),
+    "gap_keys":     ("أعمدة الهوية غير الموجودة في الملف",
+                     "Identity columns this file does not carry"),
+    "gap_rules":    ("لوائح لا تستطيع العمل على هذا الملف، وعمود كل منها",
+                     "Regulations this file cannot let speak, and the "
+                     "column each one reads"),
+    "cannot_scan":  ("لا يمكن فحص هذا الملف",
+                     "This file cannot be scanned"),
+    "why_stopped":  ("لا يُنذَر عن طالب لا يُعرف رقمه، ولا يُبنى إنذار على "
+                     "ملف لا يحمل مؤشراً واحداً ولا لائحة واحدة. أضف ما "
+                     "ينقص أدناه وارفع الملف مرة أخرى.",
+                     "The system does not warn about a student whose number "
+                     "it does not know, and does not build an alert on a "
+                     "file carrying neither a single indicator nor a single "
+                     "regulation. Add what is listed below and upload the "
+                     "file again."),
+    "gap_cols":     ("مؤشرات لا يحملها الملف",
+                     "Indicators this file does not carry"),
+    "cols_missing": ("أُبلغ النموذج أنها مجهولة ولم تُعطَ صفراً.",
+                     "The model was told these are unknown, not given a "
+                     "zero."),
     "students":     ("طلاب", "students"),
     "rows":         ("سجلات مقرر", "course records"),
     "flagged":      ("منذَر عنهم", "flagged"),
@@ -529,6 +556,35 @@ def plain_date(text):
     """
     return "⁦" + str(text) + "⁩"
 
+def block(heading, items, note=""):
+    """One titled list, for a message that has several things to say.
+
+    Three findings run together in a paragraph read as one long sentence
+    and get skimmed. Under their own headings, each is a list an advisor
+    can work through and tick off. A heading says what the list is in a
+    few words; anything longer goes in the note underneath it, where it
+    does not push the heading onto a second line.
+    """
+    out = "**" + heading + "**"
+    if note:
+        out = out + "\n\n" + note
+    out = out + "\n"
+    for item in items:
+        out = out + "\n- " + item
+    return out
+
+
+def joiner():
+    """The list separator of the language on screen."""
+    return "، " if st.session_state["lang"] == "ar" else ", "
+
+
+def rule_name(name):
+    """The plain name of one regulation."""
+    pair = RULE_WORDS.get(name, (name, name))
+    return pair[0] if st.session_state["lang"] == "ar" else pair[1]
+
+
 def word(name):
     """The plain name of one indicator."""
     pair = WORDS.get(name, (name, name))
@@ -541,6 +597,11 @@ def word(name):
 def load_model():
     return joblib.load(settings.project_file("final_model.pkl"))
 
+# The three columns that identify a record: which student, which course,
+# which term. Everything else the system can do without.
+KEY_COLUMNS = ["id_student", "code_module", "code_presentation"]
+
+
 def read_cohort(source):
     """Read a cohort file and line its columns up with what the model needs.
 
@@ -551,13 +612,42 @@ def read_cohort(source):
     """
     table = pd.read_csv(source)
 
+    # The three columns that say whose record this is. An indicator the
+    # file does not carry becomes an empty column and the scan goes on
+    # without it. One of these is different: without a student number
+    # there is nobody to put in the register and nobody to notify, so
+    # the scan has no subject at all. They are reported, not filled in.
+    missing_keys = [n for n in KEY_COLUMNS if n not in table.columns]
+
     missing = []
     for name in INDICATORS:
         if name not in table.columns:
             table[name] = np.nan
             missing.append(name)
 
-    return table, missing
+    return table, missing, missing_keys
+
+
+def rules_that_can_work(table, missing):
+    """Which regulations this file lets speak, and which it silences.
+
+    The regulations name the column each of them reads; all this does is
+    look for those columns. A regulation whose column is missing is not
+    broken and is not ignored — it is silent, and it says so by name.
+
+    `missing` matters more than it looks. Reading the file adds an empty
+    column for every indicator it does not carry, so by the time anyone
+    asks this question the column a regulation needs may be sitting in
+    the table with nothing in it. A column we put there ourselves is not
+    a column the file carried, and a regulation reading it would have
+    nothing to read.
+    """
+    working, silent = [], []
+    for rule in university_rules.columns_the_rules_need():
+        there = (rule["column"] in table.columns
+                 and rule["column"] not in missing)
+        (working if there else silent).append(rule)
+    return working, silent
 
 def tile(number, label, colour):
     """One counting tile, the same shape the simulation uses."""
@@ -629,8 +719,11 @@ def rule_caught(table):
         answers.append(summary["status"] != "clear")
     return pd.Series(answers, index=table.index)
 
-def scan(table, model):
-    """The whole scan, in the order the system is built on."""
+def scan(table, model, carried):
+    """The whole scan, in the order the system is built on.
+
+    carried is how many of the eleven indicators the file actually had.
+    """
     found = table.copy()
 
     # 1. the regulations, on every row
@@ -638,9 +731,17 @@ def scan(table, model):
 
     # 2. the model, on the rows no regulation caught. A rule-caught row is
     #    never put to the model, so its probability stays empty.
+    #
+    #    A file carrying none of the eleven indicators is not put to the
+    #    model at all. Asked about a row of empty cells the model answers
+    #    from the pattern it learned and nothing else, so it returns the
+    #    same number for every student in the file — on one test, 0.7677
+    #    for all three hundred of them, which flagged the whole cohort
+    #    with nothing behind any of it. The regulations still apply: they
+    #    work by arithmetic on a column, and they catch who they catch.
     found["probability"] = np.nan
     left = ~found["rule"]
-    if left.sum() > 0:
+    if carried > 0 and left.sum() > 0:
         chances = model.predict_proba(found.loc[left, INDICATORS])[:, 1]
         found.loc[left, "probability"] = chances
 
@@ -803,26 +904,66 @@ def scan_log(found, missing_count):
 def rule_reason(row):
     """Why a regulation caught this record, in the language on screen.
 
-    The arithmetic is the rules file's, not this screen's: the numbers are
-    read from the same row the rule read. Only the sentence around them is
-    written here, because a rule should not have to know which language a
-    committee is reading in.
+    It asks the regulations which of them spoke about this row and writes
+    out what they said. It used to write the submissions rule's sentence
+    whatever had actually caught the record, so a student barred for
+    absence was told about work they had handed in — and on a file with
+    no submissions column at all, the sentence came out full of "nan".
+
+    The English is the regulation's own wording, taken as it stands. Only
+    the Arabic is written here, because a rule should not have to know
+    which language a committee is reading in.
     """
-    handed_in = row["submission_rate"]
-    not_handed = round(100 - handed_in, 1)
-    if st.session_state["lang"] == "ar":
-        if handed_in == 0:
+    summary = university_rules.cohort_row_summary(row)
+    said = []
+    for alert in summary["alerts"]:
+        if alert["level"] == "information":
+            continue                      # a silent rule caught nobody
+        if st.session_state["lang"] != "ar":
+            said.append(alert["message"])
+        else:
+            said.append(rule_said_in_arabic(alert, row))
+    if len(said) == 0:
+        return ""
+    return " ".join(said)
+
+
+def rule_said_in_arabic(alert, row):
+    """One regulation's alert, in Arabic, with its own numbers in it."""
+    name = alert["rule"]
+
+    if name == "work not handed in":
+        handed = float(row["submission_rate"])
+        if handed == 0:
             return ("لم يُسلّم شيئاً من العمل المطلوب. العمل غير المسلَّم "
                     "يُرصد صفراً ما لم يُقدَّم عذر.")
-        return ("سُلِّم " + str(round(handed_in, 1)) + "٪ من العمل المطلوب، "
-                "و" + str(not_handed) + "٪ لم يُسلَّم. غير المسلَّم يُرصد "
-                "صفراً ما لم يُقدَّم عذر.")
-    if handed_in == 0:
-        return ("Nothing was handed in of the work that was due. Work not "
-                "submitted scores zero unless an excuse is filed.")
-    return (str(round(handed_in, 1)) + "% of the work that was due was handed "
-            "in, and " + str(not_handed) + "% was not. What was not handed in "
-            "scores zero unless an excuse is filed.")
+        return ("سُلِّم " + str(round(handed, 1)) + "٪ من العمل المطلوب، و"
+                + str(round(100 - handed, 1)) + "٪ لم يُسلَّم. غير المسلَّم "
+                "يُرصد صفراً ما لم يُقدَّم عذر.")
+
+    if name == "absence in person":
+        missed = int(float(row["absence_in_person"]))
+        limit = settings.MAX_ABSENCE_IN_PERSON
+        if missed >= limit:
+            return ("محروم من المقرر. " + str(missed) + " غيابات بغير عذر، "
+                    "والحد " + str(limit) + ".")
+        return ("غياب واحد يفصله عن الحرمان. " + str(missed) + " من "
+                + str(limit) + ".")
+
+    if name == "cannot reach the pass mark":
+        return ("لا يمكنه النجاح. أعلى مجموع ما زال في متناوله أقل من درجة "
+                "النجاح " + str(settings.PASS_MARK) + ".")
+
+    if name == "very little margin left":
+        return ("هامش ضيق جداً فوق درجة النجاح. يحتاج درجات شبه كاملة في كل "
+                "ما تبقى.")
+
+    if name == "window closing":
+        return ("نافذة تقديم العذر أو الانسحاب على وشك الإغلاق.")
+
+    # A rule this screen has no Arabic sentence for yet. Its own wording
+    # is shown rather than nothing at all, so no alert goes out blank.
+    return alert["message"]
 
 def model_reasons(row, model, how_many=3):
     """Which indicators pushed this record towards an alert, and by how much.
@@ -1111,7 +1252,8 @@ with tab_scan:
             table = None
             if contents != "":
                 try:
-                    table, missing = read_cohort(io.StringIO(contents))
+                    table, missing, missing_keys = read_cohort(
+                        io.StringIO(contents))
                 except Exception:
                     st.error(say("bad_file"))
                 if table is not None and len(table) == 0:
@@ -1144,23 +1286,60 @@ with tab_scan:
 
                 st.write("**" + say("cols_read") + ":** "
                          + str(carried) + " / " + str(len(INDICATORS)))
+
+                working, silent = rules_that_can_work(table, missing)
+
+                # Everything this file does not carry, said once, in one
+                # place. An advisor reading a message that names the first
+                # missing thing and stops has to fix it, upload again, and
+                # be told the second. All of it goes in together.
+                gaps = []
+                if len(missing_keys) > 0:
+                    gaps.append(block(say("gap_keys"),
+                                      [word(n) + "  `" + n + "`"
+                                       for n in missing_keys]))
                 if len(missing) > 0:
-                    st.warning(say("cols_missing") + ": "
-                               + "، ".join([word(n) for n in missing]))
+                    gaps.append(block(
+                        say("gap_cols") + "  (" + str(len(missing)) + " / "
+                        + str(len(INDICATORS)) + ")",
+                        [word(n) + "  `" + n + "`" for n in missing],
+                        say("cols_missing")))
+                if len(silent) > 0:
+                    gaps.append(block(say("gap_rules"),
+                                      [rule_name(r["rule"]) + "  `"
+                                       + r["column"] + "`"
+                                       for r in silent]))
+
+                # The scan stops for one of two reasons, and only these.
+                # Without a student number there is nobody to name. With
+                # no indicator and no regulation there is nothing to judge
+                # on: the model, handed a row of empty cells, returns the
+                # same number for every student in the file and would
+                # warn about the whole cohort for no stated reason.
+                stop = len(missing_keys) > 0 or (carried == 0
+                                                 and len(working) == 0)
+                if stop:
+                    gaps.insert(0, "#### " + say("cannot_scan") + "\n\n"
+                                + say("why_stopped"))
+
+                if len(gaps) > 0:
+                    (st.error if stop else st.warning)("\n\n".join(gaps))
 
                 # A file the system already holds can be scanned again,
                 # but the button says so and the line underneath says what
                 # happens to the first scan. An advisor pressing a button
                 # marked "scan" on a file already scanned has no way of
                 # knowing whether the earlier one is about to be lost.
-                if already is not None:
+                if already is not None and not stop:
                     st.caption(say("run_again_note"))
                 button_says = say("run_again") if already is not None \
                     else say("run")
 
-                if st.button(button_says, type="primary"):
+                # The button stays where it is and goes dim. Taking it off
+                # the screen would read as the page having broken.
+                if st.button(button_says, type="primary", disabled=stop):
                     with st.spinner(say("scanning")):
-                        found = scan(table, model)
+                        found = scan(table, model, carried)
                         st.session_state["found"] = found
                         st.session_state["log"] = scan_log(found, len(missing))
                         st.session_state["run_id"] = keep_scan(
@@ -1257,15 +1436,15 @@ with tab_scan:
 
             if scan_again.button(say("rescan"), key="rescan"):
                 contents = database.get_file_contents(int(run["file_id"]))
-                table, missing = read_cohort(io.StringIO(contents))
+                table, missing, _ = read_cohort(io.StringIO(contents))
+                stored_carried = len(INDICATORS) - len(missing)
                 with st.spinner(say("scanning")):
-                    found = scan(table, model)
+                    found = scan(table, model, stored_carried)
                     st.session_state["found"] = found
                     st.session_state["stored"] = None
                     st.session_state["log"] = scan_log(found, len(missing))
                     st.session_state["run_id"] = keep_scan(
-                        str(run["file_name"]), table, found,
-                        len(INDICATORS) - len(missing))
+                        str(run["file_name"]), table, found, stored_carried)
                 st.rerun()
 
 # ---------------------------------------------------------------
