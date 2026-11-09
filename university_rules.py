@@ -264,6 +264,18 @@ def cohort_row_summary(row):
             "submissions unknown", "information",
             "This file does not say how much of the due work was handed "
             "in, so the submissions rule cannot be applied."))
+    elif handed_in < 0 or handed_in > 100:
+        # A share of the due work cannot be below nothing or above all of
+        # it. Left unchecked the rule wrote sentences like "-25 percent
+        # was handed in and 125 percent was not", and a rate of 130 went
+        # quietly past the rule and on to the model as if it were real.
+        # A number that cannot be true is not a measurement, so the rule
+        # declines to speak and says why, as it does for a missing column.
+        alerts.append(make_alert(
+            "submissions out of range", "information",
+            "The share of due work handed in is recorded as "
+            + str(round(float(handed_in), 1)) + ", which is outside 0 to "
+            "100. The submissions rule cannot be applied to it."))
     elif handed_in < 100:
         missed = round(100 - handed_in, 1)
         alerts.append(make_alert(
@@ -281,11 +293,18 @@ def cohort_row_summary(row):
     # file with an absence column was told the rule could not be applied
     # while the column sat right there in it.
     missed = row.get("absence_in_person")
-    if missed is None or missed != missed:                 # None, or NaN
+    online = row.get("absence_online")
+    no_in_person = missed is None or missed != missed
+    no_online = online is None or online != online
+
+    if no_in_person and no_online:
         alerts.append(make_alert(
             "absence unknown", "information",
             "This file carries no record of absence, so the absence rule "
             "cannot be applied."))
+
+    if no_in_person:
+        pass
     elif missed >= settings.MAX_ABSENCE_IN_PERSON:
         alerts.append(make_alert(
             "absence in person", "barred",
@@ -297,6 +316,24 @@ def cohort_row_summary(row):
             "absence in person", "warning",
             "One absence away from being barred. " + str(int(missed))
             + " of " + str(settings.MAX_ABSENCE_IN_PERSON) + "."))
+
+    # The same limit applies to absence from online sessions, and the
+    # full engine has always checked it. The cohort path read only the
+    # in-person column, so a student six sessions over the online limit
+    # was reported clear and handed to the model.
+    if no_online:
+        pass
+    elif online >= settings.MAX_ABSENCE_ONLINE:
+        alerts.append(make_alert(
+            "absence online", "barred",
+            "Barred from the course. " + str(int(online))
+            + " unexcused online absences, the limit is "
+            + str(settings.MAX_ABSENCE_ONLINE) + "."))
+    elif online == settings.MAX_ABSENCE_ONLINE - 1:
+        alerts.append(make_alert(
+            "absence online", "warning",
+            "One online absence away from being barred. " + str(int(online))
+            + " of " + str(settings.MAX_ABSENCE_ONLINE) + "."))
 
     # Rule: the highest mark still reachable.
     #
@@ -348,8 +385,16 @@ def cohort_row_summary(row):
                 "The window for filing an excuse or withdrawing closed on "
                 "day " + str(closes_on) + "."))
         elif days_left <= settings.WINDOW_WARNING_DAYS:
+            # Information, not a warning, and the difference decides who
+            # gets flagged. The date of a course's final exam is the same
+            # for everyone sitting that course, so a closing window is
+            # true of the whole cohort at once. Raised as a warning it
+            # made every student rule-caught — a student who had handed
+            # in all of their work included — and the model was never
+            # asked about anybody. A fact that cannot tell two students
+            # apart cannot be a reason to warn about one of them.
             alerts.append(make_alert(
-                "window closing", "warning",
+                "window closing", "information",
                 str(days_left) + " days left to file an excuse or withdraw. "
                 "The window shuts on day " + str(closes_on) + "."))
         else:
@@ -377,11 +422,32 @@ def columns_the_rules_need():
     of them would fall behind the other the first time a rule changed.
     The regulations say what they need; nobody else gets to guess.
     """
+    # Each rule names EVERY column it reads. "marks still reachable"
+    # named only due_so_far, so a file carrying that column and not
+    # early_score was told the rule would work; the rule then went silent
+    # for a reason nothing on screen gave. A rule can only speak when all
+    # of its columns are there.
+    # "needs" says how to read the column list. "all" means the rule
+    # cannot speak without every one of them; "any" means one is enough,
+    # which is the absence rule, where in-person and online are two
+    # separate limits and a file may carry either.
+    #
+    # "catches" says whether the rule can ever mark a student. The
+    # withdrawal window cannot: the date of a course's final exam is the
+    # same for everyone sitting it, so the rule reports how much time is
+    # left and never singles anybody out. It matters because the scan
+    # refuses to run on a file with no indicator and no regulation that
+    # can catch, and a rule that never catches must not keep that gate
+    # open on its own.
     return [
-        {"rule": "work not handed in", "column": "submission_rate"},
-        {"rule": "absence", "column": "absence_in_person"},
-        {"rule": "marks still reachable", "column": "due_so_far"},
-        {"rule": "the withdrawal window", "column": "exam_day"},
+        {"rule": "work not handed in", "needs": "all", "catches": True,
+         "columns": ["submission_rate"]},
+        {"rule": "absence", "needs": "any", "catches": True,
+         "columns": ["absence_in_person", "absence_online"]},
+        {"rule": "marks still reachable", "needs": "all", "catches": True,
+         "columns": ["due_so_far", "early_score"]},
+        {"rule": "the withdrawal window", "needs": "all", "catches": False,
+         "columns": ["exam_day"]},
     ]
 
 

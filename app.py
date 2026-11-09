@@ -94,6 +94,7 @@ TEXT = {
     "gap_rules":    ("لوائح لا تستطيع العمل على هذا الملف، وعمود كل منها",
                      "Regulations this file cannot let speak, and the "
                      "column each one reads"),
+    "caught_nobody": ("لم تمسك أحداً", "caught nobody"),
     "cannot_scan":  ("لا يمكن فحص هذا الملف",
                      "This file cannot be scanned"),
     "why_stopped":  ("لا يُنذَر عن طالب لا يُعرف رقمه، ولا يُبنى إنذار على "
@@ -104,6 +105,11 @@ TEXT = {
                      "file carrying neither a single indicator nor a single "
                      "regulation. Add what is listed below and upload the "
                      "file again."),
+    "gap_text":     ("خانات غير قابلة للقراءة كرقم",
+                     "Cells that could not be read as a number"),
+    "gap_text_note": ("قُرئت كقيمة مجهولة، لا كصفر — كما يُقرأ أي نقص آخر.",
+                      "They were read as not known, not as a zero, the "
+                      "same as any other gap."),
     "gap_cols":     ("مؤشرات لا يحملها الملف",
                      "Indicators this file does not carry"),
     "cols_missing": ("أُبلغ النموذج أنها مجهولة ولم تُعطَ صفراً.",
@@ -376,6 +382,19 @@ def count_students(n):
         return str(n) + " طلاب"
     return str(n) + " طالباً"
 
+def count_cells(n):
+    """A count of cells, agreeing in Arabic."""
+    if st.session_state["lang"] != "ar":
+        return str(n) + (" cell" if n == 1 else " cells")
+    if n == 1:
+        return "خانة واحدة"
+    if n == 2:
+        return "خانتان"
+    if 3 <= n <= 10:
+        return str(n) + " خانات"
+    return str(n) + " خانة"
+
+
 def count_records(n):
     """The same, for course records rather than students."""
     if st.session_state["lang"] != "ar":
@@ -625,28 +644,107 @@ def read_cohort(source):
             table[name] = np.nan
             missing.append(name)
 
-    return table, missing, missing_keys
+    # Every indicator must be a number. A file with the word "absent" in
+    # a column of click counts used to reach the model and bring down the
+    # whole page with a traceback. Text in a numbered column is read the
+    # same way an empty cell is read: not known. That is the system's own
+    # rule for a value it does not have, and it is applied here rather
+    # than crashing or quietly treating the text as a zero. How many
+    # cells this touched is counted, because an advisor whose file has
+    # text in it should be told, not left to wonder.
+    unreadable = {}
+    for name in INDICATORS:
+        before = table[name].notna().sum()
+        table[name] = pd.to_numeric(table[name], errors="coerce")
+        lost = int(before - table[name].notna().sum())
+        if lost > 0:
+            unreadable[name] = lost
+
+    return table, missing, missing_keys, unreadable
+
+
+def column_has_values(table, name, missing):
+    """Is this column in the file, and does it hold anything?
+
+    Three separate things can be true of a column and only one of them
+    lets a regulation read it. It can be absent. It can be a column the
+    reading step added, empty, because the file did not carry it. Or it
+    can be there with nothing in it, which looked like a working column
+    and let a file of nothing but ID numbers through the gate.
+    """
+    if name not in table.columns or name in missing:
+        return False
+    return bool(table[name].notna().any())
+
+
+def rule_tally(found):
+    """What each regulation did to this whole file.
+
+    Asks the regulations themselves, row by row, and counts the students
+    each one actually caught. A rule is silent here only when no row in
+    the file let it speak, and then it names the columns it was waiting
+    for rather than claiming the file does not have them.
+    """
+    rules = university_rules.columns_the_rules_need()
+    names = {r["rule"]: set() for r in rules}
+    # the alert names a rule produces, mapped back to the rule itself
+    produced_by = {
+        "work not handed in": "work not handed in",
+        "submissions out of range": None,
+        "absence in person": "absence",
+        "absence online": "absence",
+        "cannot reach the pass mark": "marks still reachable",
+        "very little margin left": "marks still reachable",
+        "window closed": "the withdrawal window",
+        "window closing": "the withdrawal window",
+        "window open": "the withdrawal window",
+    }
+
+    spoke = {r["rule"]: False for r in rules}
+    for i in range(len(found)):
+        row = found.iloc[i]
+        for alert in university_rules.cohort_row_summary(row)["alerts"]:
+            owner = produced_by.get(alert["rule"])
+            if owner is None:
+                continue
+            spoke[owner] = True
+            if alert["level"] != "information":
+                names[owner].add(str(row["id_student"]))
+
+    out = []
+    for r in rules:
+        here = [c for c in r["columns"] if c in found.columns
+                and found[c].notna().any()]
+        wanting = [c for c in r["columns"] if c not in here]
+        out.append({
+            "rule": r["rule"],
+            "columns": r["columns"],
+            "wanting": wanting,
+            "silent": not spoke[r["rule"]],
+            "caught": len(names[r["rule"]]),
+        })
+    return out
 
 
 def rules_that_can_work(table, missing):
     """Which regulations this file lets speak, and which it silences.
 
-    The regulations name the column each of them reads; all this does is
-    look for those columns. A regulation whose column is missing is not
-    broken and is not ignored — it is silent, and it says so by name.
-
-    `missing` matters more than it looks. Reading the file adds an empty
-    column for every indicator it does not carry, so by the time anyone
-    asks this question the column a regulation needs may be sitting in
-    the table with nothing in it. A column we put there ourselves is not
-    a column the file carried, and a regulation reading it would have
-    nothing to read.
+    The regulations name every column each of them reads and say whether
+    one is enough or all are needed. A regulation that cannot read what
+    it needs is not broken and is not ignored — it is silent, and it
+    says so, naming the columns it was waiting for.
     """
     working, silent = [], []
     for rule in university_rules.columns_the_rules_need():
-        there = (rule["column"] in table.columns
-                 and rule["column"] not in missing)
-        (working if there else silent).append(rule)
+        have = [c for c in rule["columns"]
+                if column_has_values(table, c, missing)]
+        if rule["needs"] == "any":
+            can = len(have) > 0
+        else:
+            can = len(have) == len(rule["columns"])
+        found = dict(rule)
+        found["wanting"] = [c for c in rule["columns"] if c not in have]
+        (working if can else silent).append(found)
     return working, silent
 
 def tile(number, label, colour):
@@ -771,8 +869,23 @@ def columns_we_keep(table):
     which course, and the eleven indicators. Everything else is dropped
     before the file is written down.
     """
-    wanted = ["id_student", "code_module", "code_presentation"] + INDICATORS
-    keep = [c for c in wanted if c in table.columns]
+    # The columns the regulations read belong here too. They were left
+    # out, and a file whose absence column caught three hundred students
+    # was stored without it: scanning the stored copy again would have
+    # found nobody, and nobody could have checked the alerts the first
+    # scan sent. A record of a decision has to carry what the decision
+    # was made on. The names come from the regulations themselves, so
+    # this list cannot fall behind them the next time a rule changes.
+    from_rules = []
+    for rule in university_rules.columns_the_rules_need():
+        for c in rule["columns"]:
+            if c not in from_rules:
+                from_rules.append(c)
+    wanted = KEY_COLUMNS + INDICATORS + from_rules
+    keep = []
+    for c in wanted:
+        if c in table.columns and c not in keep:
+            keep.append(c)
     return table[keep].to_csv(index=False)
 
 def keep_scan(file_name, table, found, carried):
@@ -820,7 +933,7 @@ def keep_scan(file_name, table, found, carried):
         if not row["flagged"]:
             continue
         if row["rule"]:
-            reason = rule_reason(row)
+            said = both_languages(rule_reason, row)
         else:
             # The model's reason is the handful of indicators that pushed
             # this record towards an alert, and it is written down here
@@ -830,14 +943,15 @@ def keep_scan(file_name, table, found, carried):
             # this, every model student's stored reason was the three words
             # "caught by the model", which repeat the heading above them
             # and tell an advisor nothing.
-            reason = model_reason_line(row, load_model())
+            said = both_languages(model_reason_line, row, load_model())
 
         rows.append({
             "student_id": str(row["id_student"]),
             "course_code": str(row["code_module"]) + " "
                            + str(row["code_presentation"]),
             "caught_by": "rule" if row["rule"] else "model",
-            "reason": reason,
+            "reason": said["ar"],
+            "reason_en": said["en"],
             "probability": (None if row["rule"]
                             else float(row["probability"])),
             "indicators_read": int(row["indicators_read"]),
@@ -846,15 +960,20 @@ def keep_scan(file_name, table, found, carried):
 
     return run_id
 
-def scan_log(found, missing_count):
+def scan_log(found, missing_count, carried):
     """What the scan did, written out line by line.
 
     Every line is a count taken from the scan that has just run. Nothing
     here is a fixed string with a number typed into it.
+
+    carried decides one of those lines. On a file with no indicators the
+    model is not asked at all, and the log said it had been asked about
+    every record and had cleared them — a sentence about work that never
+    happened.
     """
     people = found.groupby("id_student")["flagged"].any()
     rule_rows = int(found["rule"].sum())
-    asked = int((~found["rule"]).sum())
+    asked = int((~found["rule"]).sum()) if carried > 0 else 0
     model_rows = int(found["model_alert"].sum())
     records = len(found)
     students = found["id_student"].nunique()
@@ -869,7 +988,8 @@ def scan_log(found, missing_count):
         + str(len(INDICATORS) - missing_count) + " من " + str(len(INDICATORS)),
         "طُبِّقت اللوائح على السجلات كلها، وعددها " + str(records),
         "أمسكت اللائحة " + count_records(rule_rows),
-        "عُرض على النموذج " + count_records(asked),
+        ("عُرض على النموذج " + count_records(asked)) if carried > 0
+        else "لم يُسأل النموذج: الملف لا يحمل أي مؤشر",
         "أنذر النموذج عند حد " + format(settings.ALERT_THRESHOLD, ".2f")
         + " على "
         + count_records(model_rows),
@@ -884,7 +1004,8 @@ def scan_log(found, missing_count):
         + str(len(INDICATORS) - missing_count) + " of " + str(len(INDICATORS)),
         "regulations applied to all " + count_records(records),
         "caught by a regulation: " + count_records(rule_rows),
-        "put to the model: " + count_records(asked),
+        ("put to the model: " + count_records(asked)) if carried > 0
+        else "the model was not asked: the file carries no indicator",
         "flagged by the model at "
         + format(settings.ALERT_THRESHOLD, ".2f") + ": "
         + count_records(model_rows),
@@ -900,6 +1021,37 @@ def scan_log(found, missing_count):
     for line in lines:
         out = out + '<span class="d">&gt;</span> ' + line + "<br>"
     return out + "<b>" + done + "</b>"
+
+def both_languages(maker, row, model=None):
+    """One reason, written in Arabic and in English.
+
+    A stored record outlives the language it was written in. The reason
+    used to be saved in whichever language was on screen at the moment
+    of the scan, so a register opened in Arabic showed English sentences
+    from a scan run in English the week before. Both are written down,
+    and the screen picks the one it needs.
+    """
+    was = st.session_state["lang"]
+    out = {}
+    for lang in ["ar", "en"]:
+        st.session_state["lang"] = lang
+        out[lang] = maker(row) if model is None else maker(row, model)
+    st.session_state["lang"] = was
+    return out
+
+
+def stored_reason(part):
+    """The stored reason, in the language on screen.
+
+    Rows written before the English column existed fall back to the one
+    reason they have, rather than showing an empty cell.
+    """
+    if st.session_state["lang"] == "ar" or "reason_en" not in part.columns:
+        return part["reason"].values
+    return [en if isinstance(en, str) and en != "" else ar
+            for en, ar in zip(part["reason_en"].values,
+                              part["reason"].values)]
+
 
 def rule_reason(row):
     """Why a regulation caught this record, in the language on screen.
@@ -950,16 +1102,30 @@ def rule_said_in_arabic(alert, row):
         return ("غياب واحد يفصله عن الحرمان. " + str(missed) + " من "
                 + str(limit) + ".")
 
-    if name == "cannot reach the pass mark":
-        return ("لا يمكنه النجاح. أعلى مجموع ما زال في متناوله أقل من درجة "
-                "النجاح " + str(settings.PASS_MARK) + ".")
-
-    if name == "very little margin left":
-        return ("هامش ضيق جداً فوق درجة النجاح. يحتاج درجات شبه كاملة في كل "
+    if name in ["cannot reach the pass mark", "very little margin left"]:
+        # The same arithmetic the rule did, so the Arabic names the same
+        # numbers the English does. Written without them, the sentence
+        # said a student could not pass and never said what their ceiling
+        # was — an alert with no figure in it is not a reason.
+        due = float(row["due_so_far"])
+        got = float(row["early_score"])
+        highest = round(got / 100.0 * due + (100.0 - due), 1)
+        if name == "cannot reach the pass mark":
+            return ("لا يمكنه النجاح. أعلى مجموع ما زال في متناوله "
+                    + str(highest) + " ودرجة النجاح "
+                    + str(settings.PASS_MARK) + ".")
+        return ("هامش ضيق: " + str(round(highest - settings.PASS_MARK, 1))
+                + " درجة فقط فوق درجة النجاح. يحتاج درجات شبه كاملة في كل "
                 "ما تبقى.")
 
-    if name == "window closing":
-        return ("نافذة تقديم العذر أو الانسحاب على وشك الإغلاق.")
+    if name == "absence online":
+        missed = int(float(row["absence_online"]))
+        limit = settings.MAX_ABSENCE_ONLINE
+        if missed >= limit:
+            return ("محروم من المقرر. " + str(missed) + " غيابات إلكترونية "
+                    "بغير عذر، والحد " + str(limit) + ".")
+        return ("غياب إلكتروني واحد يفصله عن الحرمان. " + str(missed)
+                + " من " + str(limit) + ".")
 
     # A rule this screen has no Arabic sentence for yet. Its own wording
     # is shown rather than nothing at all, so no alert goes out blank.
@@ -1062,8 +1228,8 @@ if "sent" not in st.session_state:
     st.session_state["sent"] = database.notices_already_sent()
 if "found" not in st.session_state:
     st.session_state["found"] = None
-if "log" not in st.session_state:
-    st.session_state["log"] = ""
+if "log_of" not in st.session_state:
+    st.session_state["log_of"] = None
 if "file_now" not in st.session_state:
     st.session_state["file_now"] = ""
 if "run_id" not in st.session_state:
@@ -1202,7 +1368,12 @@ with tab_scan:
         st.info(say("db_closed"))
 
     else:
-        handed = st.file_uploader(say("upload"), type=["csv"])
+        # The key is fixed and the label is not part of it. Without one,
+        # changing language changed the uploader's label, Streamlit took
+        # it for a different widget, and the file the advisor had just
+        # scanned disappeared along with the result on screen.
+        handed = st.file_uploader(say("upload"), type=["csv"],
+                                  key="cohort_upload")
 
         # Streamlit's uploader takes a dropped file as well as a chosen one,
         # but says so only in English and only on the button. This line says
@@ -1236,7 +1407,7 @@ with tab_scan:
             if st.session_state["file_now"] != handed.name + contents[:200]:
                 st.session_state["file_now"] = handed.name + contents[:200]
                 st.session_state["found"] = None
-                st.session_state["log"] = ""
+                st.session_state["log_of"] = None
                 st.session_state["sent"] = database.notices_already_sent()
                 # The result opened from the database has to go as well.
                 # Without this the register kept showing the students of an
@@ -1252,7 +1423,7 @@ with tab_scan:
             table = None
             if contents != "":
                 try:
-                    table, missing, missing_keys = read_cohort(
+                    table, missing, missing_keys, unreadable = read_cohort(
                         io.StringIO(contents))
                 except Exception:
                     st.error(say("bad_file"))
@@ -1304,10 +1475,18 @@ with tab_scan:
                         + str(len(INDICATORS)) + ")",
                         [word(n) + "  `" + n + "`" for n in missing],
                         say("cols_missing")))
+                if len(unreadable) > 0:
+                    gaps.append(block(
+                        say("gap_text"),
+                        [word(n) + "  `" + n + "`  —  "
+                         + count_cells(unreadable[n])
+                         for n in unreadable],
+                        say("gap_text_note")))
                 if len(silent) > 0:
                     gaps.append(block(say("gap_rules"),
-                                      [rule_name(r["rule"]) + "  `"
-                                       + r["column"] + "`"
+                                      [rule_name(r["rule"]) + "  "
+                                       + " ".join("`" + c + "`"
+                                                  for c in r["wanting"])
                                        for r in silent]))
 
                 # The scan stops for one of two reasons, and only these.
@@ -1316,8 +1495,9 @@ with tab_scan:
                 # on: the model, handed a row of empty cells, returns the
                 # same number for every student in the file and would
                 # warn about the whole cohort for no stated reason.
+                catchers = [r for r in working if r["catches"]]
                 stop = len(missing_keys) > 0 or (carried == 0
-                                                 and len(working) == 0)
+                                                 and len(catchers) == 0)
                 if stop:
                     gaps.insert(0, "#### " + say("cannot_scan") + "\n\n"
                                 + say("why_stopped"))
@@ -1341,7 +1521,7 @@ with tab_scan:
                     with st.spinner(say("scanning")):
                         found = scan(table, model, carried)
                         st.session_state["found"] = found
-                        st.session_state["log"] = scan_log(found, len(missing))
+                        st.session_state["log_of"] = (len(missing), carried)
                         st.session_state["run_id"] = keep_scan(
                             handed.name, table, found, carried)
                     st.rerun()
@@ -1364,8 +1544,15 @@ with tab_scan:
         st.markdown('<div class="steps">' + steps + '</div>',
                     unsafe_allow_html=True)
 
-        st.markdown('<div class="log">' + st.session_state["log"] + '</div>',
-                    unsafe_allow_html=True)
+        # Written out now, in the language on screen now. It used to be
+        # rendered once at scan time and printed unchanged ever after, so
+        # switching language left eight English lines under an Arabic
+        # heading. Only the two numbers it needs are kept.
+        if st.session_state["log_of"] is not None:
+            missed_count, carried_then = st.session_state["log_of"]
+            st.markdown('<div class="log">'
+                        + scan_log(found, missed_count, carried_then)
+                        + '</div>', unsafe_allow_html=True)
 
         st.markdown(
             '<div class="split">'
@@ -1382,19 +1569,28 @@ with tab_scan:
         st.divider()
         st.subheader(say("rules_state"))
 
-        # Each line is the rule's own answer about this file, asked of the
-        # rules file itself. Nothing here is a sentence written by hand, so
-        # the table cannot drift away from what the rules actually did.
-        reach = university_rules.what_the_rules_can_reach(found.iloc[0])
+        # What each regulation did to THIS file, counted over the whole
+        # file. It used to be read off the first row alone, so one blank
+        # cell at the top made the table announce that a column was not
+        # in the file while the register below listed ninety four
+        # students that same rule had caught. And every rule that spoke
+        # was credited with the same number — the students caught by any
+        # rule at all — so three rules each claimed the same three.
         lines = []
-        for r in reach:
+        for r in rule_tally(found):
             if r["silent"]:
                 verdict = say("silent")
+                if len(r["wanting"]) > 0:
+                    verdict = verdict + " — " + joiner().join(r["wanting"])
             else:
-                verdict = say("speaks") + " — " + count_students(len(rule_people))
+                verdict = say("speaks") + " — " + (
+                    say("caught_nobody") if r["caught"] == 0
+                    else count_students(r["caught"]))
             lines.append({
-                say("rule_name"): say("rule_" + r["rule"].replace(" ", "_")),
-                say("rule_needs"): say("needs_" + r["needs"].replace(" ", "_")),
+                say("rule_name"): rule_name(r["rule"]),
+                say("rule_needs"): "، ".join(r["columns"])
+                if st.session_state["lang"] == "ar"
+                else ", ".join(r["columns"]),
                 say("rule_says"): verdict,
             })
         st.dataframe(pd.DataFrame(lines), hide_index=True, width="stretch")
@@ -1436,13 +1632,14 @@ with tab_scan:
 
             if scan_again.button(say("rescan"), key="rescan"):
                 contents = database.get_file_contents(int(run["file_id"]))
-                table, missing, _ = read_cohort(io.StringIO(contents))
+                table, missing, _, _ = read_cohort(io.StringIO(contents))
                 stored_carried = len(INDICATORS) - len(missing)
                 with st.spinner(say("scanning")):
                     found = scan(table, model, stored_carried)
                     st.session_state["found"] = found
                     st.session_state["stored"] = None
-                    st.session_state["log"] = scan_log(found, len(missing))
+                    st.session_state["log_of"] = (len(missing),
+                                                  stored_carried)
                     st.session_state["run_id"] = keep_scan(
                         str(run["file_name"]), table, found, stored_carried)
                 st.rerun()
@@ -1505,7 +1702,7 @@ with tab_register:
                 say("col_caught"): [say("by_rule") if c == "rule"
                                     else say("by_model")
                                     for c in part["caught_by"].values],
-                say("col_reason"): part["reason"].values,
+                say("col_reason"): stored_reason(part),
                 say("col_prob"): chance,
                 say("col_read"): part["indicators_read"].values,
             })
@@ -1740,6 +1937,18 @@ with tab_evidence:
         "what the student does": ("ما يفعله الطالب", "what the student does"),
         "the record and the doing": ("السجل والسلوك معاً",
                                      "the record and the doing"),
+        # the Note column of results_indicator_groups.csv
+        "refused by the system, trained here only to price the refusal":
+            ("يرفضها النظام، ودُرِّبت هنا فقط لقياس ثمن رفضها",
+             "refused by the system, trained here only to price the refusal"),
+        "what any registry already holds":
+            ("ما تملكه أي إدارة قبول وتسجيل",
+             "what any registry already holds"),
+        "needs a platform that watches":
+            ("يحتاج منصة تعليمية تسجّل النشاط",
+             "needs a platform that watches"),
+        "the system as built":
+            ("النظام كما هو مبني", "the system as built"),
         # The three columns the fairness audit reads, and their values.
         # The published data writes them as gender / F / True; on screen
         # they are written the way a committee would say them.
@@ -1835,7 +2044,10 @@ with tab_evidence:
         # unmeasured has no bar, because a bar of zero would say we
         # measured a recall of zero, which is not what the empty cell
         # in the table above means.
-        drawn = fair.dropna(subset=["Recall", "Precision"]).copy()
+        drawn = fair.copy()
+        for name in ["Recall", "Precision"]:
+            drawn[name] = pd.to_numeric(drawn[name], errors="coerce")
+        drawn = drawn.dropna(subset=["Recall", "Precision"])
         # Each bar is named by its attribute as well as its group, because
         # "True" and "F" on their own say nothing, and the two measures
         # stand side by side rather than stacked: a recall and a precision

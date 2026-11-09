@@ -130,6 +130,7 @@ def create_tables():
             course_code     TEXT NOT NULL,
             caught_by       TEXT NOT NULL,
             reason          TEXT,
+            reason_en       TEXT,
             probability     REAL,
             indicators_read INTEGER,
             FOREIGN KEY (run_id) REFERENCES scan_run (run_id)
@@ -280,10 +281,11 @@ def save_results(run_id, rows):
         cursor.execute("""
             INSERT INTO scan_result
                 (run_id, student_id, course_code, caught_by, reason,
-                 probability, indicators_read)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                 reason_en, probability, indicators_read)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (run_id, row["student_id"], row["course_code"], row["caught_by"],
-              row["reason"], row["probability"], row["indicators_read"]))
+              row["reason"], row.get("reason_en"), row["probability"],
+              row["indicators_read"]))
     connection.commit()
     connection.close()
 
@@ -307,8 +309,8 @@ def get_results(run_id):
     """Everything one run flagged, read back exactly as it was written."""
     connection = connect()
     rows = pd.read_sql_query("""
-        SELECT student_id, course_code, caught_by, reason, probability,
-               indicators_read
+        SELECT student_id, course_code, caught_by, reason, reason_en,
+               probability, indicators_read
         FROM scan_result
         WHERE run_id = ?
         ORDER BY caught_by DESC, student_id
