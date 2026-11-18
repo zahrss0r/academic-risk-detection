@@ -41,6 +41,7 @@ import io
 import numpy as np
 import pandas as pd
 import streamlit as st
+import altair as alt
 import joblib
 
 import settings
@@ -1298,6 +1299,25 @@ TAB_NAMES = [say("tab_scan"), say("tab_register"), say("tab_evidence")]
 TAB_KEY = ("nav_" + st.session_state["lang"]
            + "_" + str(st.session_state["tab_nonce"]))
 
+# Where the advisor actually is, read BEFORE the strip is built.
+#
+# The order matters and it is the whole of it. A click on a tab sets the
+# strip's own state and asks for a rerun; on that rerun the strip is
+# built again, and the tab it opens on is whatever is handed to default.
+# Read afterwards, the position would still be the one the advisor had
+# left a moment ago, the strip would open there, and the click would
+# appear to have done nothing - it took a second click to show. Read
+# first, default is already the tab that was just clicked.
+#
+# When the code moves the strip itself the key is new, so there is
+# nothing stored under it, nothing is read, and the position go_to_tab
+# set is the one that stands. The language switch is the same case: the
+# language is part of the key, so the new key is empty and the position
+# it saved under the old key, above, is the one used.
+showing = st.session_state.get(TAB_KEY)
+if showing in TAB_NAMES:
+    st.session_state["which_tab"] = TAB_NAMES.index(showing)
+
 # on_change="rerun" is what makes the strip tell the program which tab
 # was chosen. Left alone, a tab click is handled entirely in the browser
 # and never reaches here, so the program has no way of knowing where the
@@ -1306,14 +1326,6 @@ TAB_KEY = ("nav_" + st.session_state["lang"]
 tab_scan, tab_register, tab_evidence = st.tabs(
     TAB_NAMES, default=TAB_NAMES[st.session_state["which_tab"]],
     key=TAB_KEY, on_change="rerun")
-
-# Where the advisor actually is, written back after the strip is drawn,
-# for the reruns that do run the program - a scan, a notice sent. The
-# language switch cannot rely on this one, because by the time it runs
-# the key has already changed; it reads the old key itself, above.
-showing = st.session_state.get(TAB_KEY)
-if showing in TAB_NAMES:
-    st.session_state["which_tab"] = TAB_NAMES.index(showing)
 
 # ---------------------------------------------------------------
 with tab_scan:
@@ -2022,10 +2034,36 @@ with tab_evidence:
             for a, g in zip(drawn["Attribute"], drawn["Group"])]
         # Laid on its side, so each group's name has a line of its own
         # instead of being stood on its edge under a bar.
-        bars = drawn.set_index(say("col_group"))[["Recall", "Precision"]]
-        bars.columns = [say("m_recall"), say("m_precision")]
-        st.bar_chart(bars, color=["#1b8354", "#b45309"], height=360,
-                     stack=False, horizontal=True)
+        #
+        # The axis is pinned from nought to one, and it is drawn here
+        # rather than by the plain bar chart because that one has no way
+        # to pin it. Left to choose, it fits the axis to the bars and to
+        # the width it is given, and the same figures came out once on an
+        # axis of nought to one and once on an axis running from below
+        # nought to past one and a half. Both measures are proportions.
+        # Neither can be less than nothing or more than everything, and
+        # an axis that says otherwise invites the reader to compare two
+        # drawings of the same table and find them different.
+        tall = drawn.melt(id_vars=[say("col_group")],
+                          value_vars=["Recall", "Precision"],
+                          var_name="measure", value_name="value")
+        tall = tall.rename(columns={say("col_group"): "group"})
+        tall["measure"] = tall["measure"].map(
+            {"Recall": say("m_recall"), "Precision": say("m_precision")})
+
+        order = list(drawn[say("col_group")])
+        both = [say("m_recall"), say("m_precision")]
+        st.altair_chart(
+            alt.Chart(tall).mark_bar().encode(
+                x=alt.X("value:Q", title=None,
+                        scale=alt.Scale(domain=[0, 1], nice=False)),
+                y=alt.Y("group:N", title=None, sort=order),
+                yOffset=alt.YOffset("measure:N", sort=both),
+                color=alt.Color(
+                    "measure:N", title=None,
+                    scale=alt.Scale(domain=both,
+                                    range=["#1b8354", "#b45309"]))),
+            height=360)
 
     # ---- 7. the result
     #
