@@ -28,10 +28,8 @@
 # addresses, or anything else that identifies a person outside the
 # university's own records.
 #
-# The Senior Project I report said the system would store nothing at all.
-# That has changed, deliberately, and the privacy requirement in Chapter 4
-# is rewritten to describe exactly the tables below.
-
+# The privacy requirement in Chapter 4 describes exactly the tables below.
+#
 import hashlib
 import sqlite3
 import pandas as pd
@@ -53,12 +51,9 @@ def create_tables():
     connection = connect()
     cursor = connection.cursor()
 
-    # One row per student the system has ever read, and only what a
-    # cohort file actually carries about them. An earlier version of this
-    # table also had a programme and a level, which no cohort file holds
-    # and which nothing in the system ever filled, so every notice pointed
-    # at a student row that did not exist. A table is either filled by the
-    # system that owns it or it does not belong in it.
+    # One row per student the system has ever read, and only what a cohort
+    # file actually carries about them. A table is either filled by the
+    # system that owns it, or it does not belong in it.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS student (
             student_id        TEXT PRIMARY KEY,
@@ -71,9 +66,7 @@ def create_tables():
     # the one to many relationship in the entity relationship diagram.
     #
     # The columns follow the system exactly:
-    #   caught_by        'rule' or 'model', never both, because a row a rule
-    #                    caught is never put to the model
-    #   probability      empty for a rule-caught row, for the same reason
+    #   probability      what the model gave this student, between 0 and 1
     #   reason           the sentence the advisor was shown, computed from
     #                    that student's own row and stored as it was shown
     #   indicators_read  how many of the indicators carried a value, so a
@@ -112,8 +105,6 @@ def create_tables():
             students           INTEGER,
             records            INTEGER,
             flagged            INTEGER,
-            by_rule            INTEGER,
-            by_model           INTEGER,
             indicators_carried INTEGER,
             FOREIGN KEY (file_id) REFERENCES cohort_file (file_id)
         )
@@ -128,7 +119,6 @@ def create_tables():
             run_id          INTEGER NOT NULL,
             student_id      TEXT NOT NULL,
             course_code     TEXT NOT NULL,
-            caught_by       TEXT NOT NULL,
             reason          TEXT,
             reason_en       TEXT,
             probability     REAL,
@@ -144,7 +134,6 @@ def create_tables():
             course_code      TEXT NOT NULL,
             made_on          TEXT NOT NULL,
             day_of_term      INTEGER,
-            caught_by        TEXT NOT NULL,
             reason           TEXT,
             probability      REAL,
             indicators_read  INTEGER,
@@ -251,17 +240,17 @@ def other_versions(file_name, contents):
 
 
 def save_run(file_id, ran_on, day_of_term, threshold, students, records,
-             flagged, by_rule, by_model, indicators_carried):
+             flagged, indicators_carried):
     """Records one scan and hands back its run_id."""
     connection = connect()
     cursor = connection.cursor()
     cursor.execute("""
         INSERT INTO scan_run
             (file_id, ran_on, day_of_term, threshold, students, records,
-             flagged, by_rule, by_model, indicators_carried)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             flagged, indicators_carried)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """, (file_id, ran_on, day_of_term, threshold, students, records,
-          flagged, by_rule, by_model, indicators_carried))
+          flagged, indicators_carried))
     connection.commit()
     run_id = cursor.lastrowid
     connection.close()
@@ -280,10 +269,10 @@ def save_results(run_id, rows):
     for row in rows:
         cursor.execute("""
             INSERT INTO scan_result
-                (run_id, student_id, course_code, caught_by, reason,
+                (run_id, student_id, course_code, reason,
                  reason_en, probability, indicators_read)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (run_id, row["student_id"], row["course_code"], row["caught_by"],
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (run_id, row["student_id"], row["course_code"],
               row["reason"], row.get("reason_en"), row["probability"],
               row["indicators_read"]))
     connection.commit()
@@ -295,7 +284,7 @@ def get_runs():
     connection = connect()
     runs = pd.read_sql_query("""
         SELECT r.run_id, r.file_id, f.file_name, r.ran_on, r.students,
-               r.records, r.flagged, r.by_rule, r.by_model,
+               r.records, r.flagged,
                r.indicators_carried, f.uploaded_on
         FROM scan_run r
         JOIN cohort_file f ON f.file_id = r.file_id
@@ -309,11 +298,11 @@ def get_results(run_id):
     """Everything one run flagged, read back exactly as it was written."""
     connection = connect()
     rows = pd.read_sql_query("""
-        SELECT student_id, course_code, caught_by, reason, reason_en,
+        SELECT student_id, course_code, reason, reason_en,
                probability, indicators_read
         FROM scan_result
         WHERE run_id = ?
-        ORDER BY caught_by DESC, student_id
+        ORDER BY probability DESC, student_id
     """, connection, params=(run_id,))
     connection.close()
     return rows
@@ -332,7 +321,7 @@ def get_file_contents(file_id):
     return row[0]
 
 
-def save_notice(student_id, course_code, made_on, day_of_term, caught_by,
+def save_notice(student_id, course_code, made_on, day_of_term,
                 reason, probability, indicators_read, state):
     # Adds one notice. notice_id is filled in by the database.
     #
@@ -344,10 +333,10 @@ def save_notice(student_id, course_code, made_on, day_of_term, caught_by,
 
     cursor.execute("""
         INSERT INTO notice
-            (student_id, course_code, made_on, day_of_term, caught_by,
+            (student_id, course_code, made_on, day_of_term,
              reason, probability, indicators_read, state)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (student_id, course_code, made_on, day_of_term, caught_by,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (student_id, course_code, made_on, day_of_term,
           reason, probability, indicators_read, state))
 
     connection.commit()
@@ -359,7 +348,7 @@ def get_notices(student_id):
     connection = connect()
 
     history = pd.read_sql_query("""
-        SELECT made_on, course_code, day_of_term, caught_by, reason,
+        SELECT made_on, course_code, day_of_term, reason,
                probability, indicators_read, state
         FROM notice
         WHERE student_id = ?
@@ -428,10 +417,9 @@ def export_tables():
 def notices_already_sent():
     """Every student who has already been notified, and when.
 
-    The interface used to keep this in memory alone, so closing the
-    browser made every notice disappear from the screen while its row sat
-    in this table unread. A notice is a record of something that actually
-    happened, so the screen reads it back from here.
+    A notice is a record of something that actually happened, so the screen
+    reads it back from this table rather than holding it in memory, where
+    closing the browser would lose it.
     """
     connection = connect()
     rows = pd.read_sql_query("""

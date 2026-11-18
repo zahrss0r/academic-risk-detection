@@ -1,0 +1,9 @@
+candidate,gain_in_cross_validation,auc_without_it,it_adds_to_auc,at_risk_it_gains,at_risk_it_loses,net_at_risk,rows_with_no_value,decisions_moved_with_no_value,verdict
+score_mean,0.313,0.8338,0.0361,41,29,12,129,0,keeps its place
+weight_sum,0.0451,0.859,0.0109,17,25,-8,129,0,keeps its place
+visit_day_last,0.0098,0.8638,0.0061,24,20,4,52,0,keeps its place
+late_days_mean,0.0044,0.8654,0.0044,20,25,-5,129,0,keeps its place
+clicks_homepage,0.0029,0.868,0.0019,17,12,5,55,0,keeps its place
+highest_education,0.0022,0.8673,0.0025,18,12,6,0,0,keeps its place
+score_std,0.001,0.8704,-0.0005,13,15,-2,252,3,not confirmed
+clicks_dualpane,0.0013,0.8704,-0.0005,11,10,1,2115,79,not confirmed

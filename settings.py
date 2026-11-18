@@ -1,10 +1,19 @@
-# settings.py
-#
-# Every number and every list that the rest of the project depends on.
-#
-# There is one reason this file exists: if a number lives in five files,
-# then one day somebody changes four of them. Here it is changed once and
-# every file sees it.
+"""
+settings.py
+Smart Academic Risk Detection System
+
+Every number and every list that the rest of the system depends on.
+
+There is one reason this file exists: if a number lives in five files, then
+one day somebody changes four of them. Here it is changed once and every
+file sees it.
+
+The system is one trained model. It reads a cohort's records, builds six
+indicators from them, gives each student a probability, and raises an alert
+above a threshold. Each of those three things - the six indicators, the day
+the scan happens, and the threshold - was measured, and the measurement is
+written beside it below.
+"""
 
 import os
 
@@ -19,205 +28,193 @@ PROJECT_FOLDER = os.path.dirname(os.path.abspath(__file__))
 
 
 def project_file(name):
-    # The full path to a file that lives beside the code.
-    #
-    # We do not just write "final_model.pkl" and hope, because a program is
-    # not always started from the folder its code is in. Streamlit Cloud
-    # starts the application from the top of the repository, so a bare file
-    # name would be looked for in the wrong place and nothing would load.
-    # Building the path from this file's own location works wherever the
-    # program is started from.
+    """
+    The full path to a file that lives beside the code.
+
+    We do not write a bare file name and hope, because a program is not
+    always started from the folder its code is in. Streamlit Cloud starts
+    the application from the top of the repository, so a bare name would be
+    looked for in the wrong place and nothing would load. Building the path
+    from this file's own location works wherever the program is started
+    from.
+    """
     return os.path.join(PROJECT_FOLDER, name)
-
-
-# ---------------------------------------------------------------
-# The marks, taken from the real assessment plan of the course
-# ---------------------------------------------------------------
-
-# Coursework, 40 marks in total.
-COURSEWORK_PLAN = {
-    "assignment_1": 8,
-    "assignment_2": 8,
-    "discussion": 4,
-    "quiz": 6,
-    "project": 14,
-}
-
-MIDTERM_MAX = 20
-FINAL_MAX = 40
-PASS_MARK = 60            # out of 100, below this is a fail
-
-
-# ---------------------------------------------------------------
-# The university rules
-# ---------------------------------------------------------------
-
-MAX_ABSENCE_IN_PERSON = 4   # unexcused, per course
-MAX_ABSENCE_ONLINE = 4      # unexcused, per course
-
-# A student may file an excuse or withdraw from the first day of term until
-# two weeks before the final exam of that course.
-#
-# This used to be written here as a fixed day of term, day 90, which was
-# wrong twice over. It is not our university's rule, and it cannot be a
-# fixed day at all: every course sits its final on its own date, so the
-# window closes on a different day in every course.
-#
-# So the rule needs the date of that course's final. Where a dataset
-# carries it, the rule works out the closing day and says how long is left.
-# Where it does not, the rule says nothing. It is not disabled and it is not
-# guessed; it waits for the one fact it needs.
-WINDOW_NOTICE_DAYS = 14     # the window shuts this long before the final
-
-# Warn when the window is about to close within this many days.
-WINDOW_WARNING_DAYS = 14
-
-# Warn when the highest total the student can still reach is below this.
-# The pass mark is 60, so this is a margin of 10 marks.
-TIGHT_MARGIN = 70
 
 
 # ---------------------------------------------------------------
 # The model
 # ---------------------------------------------------------------
 
+# Fixed so that every run of every script in this project gives the same
+# answer, and anybody re-running them gets our numbers and not numbers
+# close to ours.
 RANDOM_SEED = 42
 
-# The prediction moment. Day 100 of the term, roughly the middle, just after
-# the midterm. Nothing dated after this day is used anywhere.
-CUT_DAY = 100
-
-# The demonstration sets.
+# The prediction moment: day 110 of the course run.
 #
-# Three separate groups of students, drawn at random and kept out of the
-# training set, the validation set AND the test set. So a student shown on
-# screen in any demonstration has never been seen by the model and is not
-# part of any number we report.
+# The day was read off the courses themselves, under two conditions that
+# have to hold at the same time:
 #
-# Three because there are three occasions: the supervisor meeting, the
-# committee, and a spare in case something goes wrong on the day. They are
-# the same size and drawn the same way, so any one of them can stand in for
-# any other.
+#   at least two weighted pieces of work have already fallen due, so there
+#   is something to judge the student on, and
+#   at least two are still ahead, so there is still something to predict.
 #
-# 300 each. At that size about 116 of the students shown will genuinely be
-# at risk — 117, 114 and 118 in the three sets as drawn — which keeps the
-# recall seen live on screen within roughly four points of the figure in the
-# report. At 200 students it swings by five points or more, which invites an
-# awkward question about why the screen and the report disagree.
-DEMO_STUDENTS_PER_SET = 300
-DEMO_SETS = ["supervisor", "final", "backup"]
+# Those two conditions leave a window of day 68 to day 116 across the
+# fourteen course runs the model is trained on. Day 110 sits near the top of
+# that window, where 43 per cent of the coursework weight is visible rather
+# than the 25 per cent visible at day 68. A course run in this data lasts
+# between 234 and 269 days, and the assessments in it are tutor-marked work,
+# computer-marked work and a final exam.
+#
+# Nothing dated after this day is used anywhere in the system.
+CUT_DAY = 110
 
-# Raise an alert above this probability. Not the usual 0.50: missing a
-# student costs that student a term, a false alarm costs a phone call, so
-# the two mistakes are not worth the same. See results_threshold_table.csv.
-ALERT_THRESHOLD = 0.30
+# Raise an alert above this probability.
+#
+# Not the usual 0.50. Missing a student costs that student a term; a false
+# alarm costs the advisor a phone call, and what to do about an alert is the
+# advisor's decision and not the system's. The two mistakes are not worth
+# the same, so the threshold is not left at its default.
+#
+# At 0.20, on the held-out test slice: recall 0.8951, precision 0.6146, 94
+# students missed out of 896, and 503 false alarms. At 0.50 the same model
+# misses 256. The whole table of eleven thresholds is in
+# results_threshold_table.csv and the report prints all of it, not only this
+# row.
+#
+# A low threshold also turned out to be the fairer one. The widest gap in
+# recall between regions is 0.104 here against 0.189 at 0.30, and the gap on
+# disability widens steadily as the threshold is tightened.
+ALERT_THRESHOLD = 0.20
 
-# There is one threshold and no bands above it. An earlier version sorted
-# students into high, medium and stable on a second threshold of 0.65. That
-# was dropped: a band is a judgement the system is not entitled to make, and
-# the advisor was being handed three words where the honest answer is one
-# line - this student was flagged, and here is why.
+# There is one threshold and no bands above it. Sorting students into high,
+# medium and stable would be a judgement the system is not entitled to make,
+# and it would hand the advisor three words where the honest answer is one
+# line: this student was flagged, and here is why.
 
-# The eleven indicators the model is trained on, in the order it expects
-# them. Two of them, the ones ending in _missing, are not measurements. Each
-# says whether the indicator beside it was left empty, because two of the
-# indicators are a division and a division has no answer when the bottom
-# half is zero. Leaving the cell empty and recording that we left it empty
-# keeps a fact that writing a number would have hidden: a student who handed
-# in nothing has no lateness to measure, and he is not the same student as
-# one who handed everything in on time.
-MODEL_INDICATORS = [
-    "early_score",
-    "early_score_missing",
-    "submission_rate",
-    "late_rate",
-    "late_rate_missing",
-    "total_clicks",
-    "activity_days_rate",
-    "longest_gap_days",
-    "num_of_prev_attempts",
-    "studied_credits",
-    "late_registration",
+# The six indicators the model is trained on, in the order it expects them.
+#
+# These were not chosen by us. Every column in the raw data was offered to a
+# forward-selection experiment - seventy-one candidates, counting the
+# original columns and every standard aggregation of the dated tables - and
+# the experiment kept the one that helped most at each step until helping
+# stopped. The stopping rule was declared before the run: stop at the last
+# step that raised cross-validated ROC-AUC by 0.001 or more.
+#
+# The curve it produced, from nothing to the end of the path:
+#       score_mean          0.8130   (+0.3130)
+#       weight_sum          0.8581   (+0.0451)
+#       visit_day_last      0.8679   (+0.0098)
+#       late_days_mean      0.8722   (+0.0044)
+#       clicks_homepage     0.8751   (+0.0029)
+#       highest_education   0.8773   (+0.0022)
+#
+# Every candidate the path kept was then checked a second time on the
+# validation slice, which the selection never saw: train with it, train
+# without it, and compare both the ranking and the students whose decision
+# moves. A candidate earns its place only if it raises ROC-AUC on data it
+# was not chosen on. The check is check_indicators.py and its table is
+# results_indicator_check.csv.
+#
+# Two things worth knowing about the list. One indicator carries most of it:
+# score_mean alone takes the model from 0.50 to 0.813, and the other five
+# add the rest. And six beat all seventy-one together, because the longer
+# list was mostly the same fact told several different ways.
+#
+# WHAT THE EXPERIMENT DID NOT CHOOSE
+#   Not one column about who the student is. Gender, region, deprivation
+#   band, age band and disability were all offered, and the path took none
+#   of them. Neither did it take the course code or the length of the run.
+#   The one original column that survived is highest_education, which is
+#   academic background rather than a personal characteristic.
+INDICATORS = [
+    "score_mean",         # the mean of his marks so far
+    "weight_sum",         # the weight of the work he has handed in
+    "visit_day_last",     # the day of his last visit to the platform
+    "late_days_mean",     # how late, on average, his work was
+    "clicks_homepage",    # his clicks on the course home page
+    "highest_education",  # the highest qualification he holds
 ]
 
-# The same indicators split into the groups the ablation experiment compares,
-# plus the group we refuse. Training on the first group tells us what we gave
-# up by refusing it, which turns a principle into a number we can report.
-GROUP_DEMOGRAPHIC = [
-    "gender",
-    "region",
-    "age_band",
-    "imd_band",
-    "highest_education",
-    "disability",
-]
-GROUP_ACADEMIC = [
-    "early_score",
-    "early_score_missing",
-    "submission_rate",
-    "num_of_prev_attempts",
-    "studied_credits",
-    "late_registration",
-]
-GROUP_BEHAVIOURAL = [
-    "late_rate",
-    "late_rate_missing",
-    "total_clicks",
-    "activity_days_rate",
-    "longest_gap_days",
-]
-
-# Kept in the processed files so we can check the model afterwards, and
+# Kept in the processed files so the model can be checked afterwards, and
 # never given to it. A model that cannot see gender cannot learn to treat
 # students differently because of it, and keeping the column lets us check
-# that it did not reach the same bias by another route.
+# whether it reached the same unevenness by another route.
+#
+# It does, partly, and the figures say so: at a threshold of 0.20 on the
+# test slice the widest gap in recall is 0.026 by gender and 0.005 by age
+# band, but 0.104 by region and 0.121 by deprivation band. The model was
+# given none of those columns. The unevenness is in the study behaviour
+# itself, which differs between regions, and the report states it as it is.
 AUDIT_ONLY_COLUMNS = [
     "gender",
     "region",
     "age_band",
     "imd_band",
-    "highest_education",
     "disability",
     "final_result",
 ]
 
-# Two indicators our university relies on that no dataset we could obtain
-# carries alongside the rest. They are NOT rejected. The data the model
-# learned from has no column for either, so the model was never taught to
-# read them, and handing a trained model a number it has never seen gives
-# noise instead of a prediction.
+# Which event rows an uploaded cohort file can carry, and what each kind is
+# read for. The file is one row per event, the way a university system
+# exports its records, and the system does the rest: it cuts everything
+# after the cut day, builds the six indicators, scores, and reports.
+EVENT_ENROLMENT = "enrolment"     # one row per student per course
+EVENT_SUBMISSION = "submission"   # one piece of work handed in
+EVENT_ACTIVITY = "activity"       # one day's clicks on one page
+
+# WHY AN ENROLMENT ROW EXISTS AND IS NOT OPTIONAL
+#   A student who has handed in nothing and never opened the platform has
+#   no submission row and no activity row, so a file built only of those
+#   two kinds has no row for that student anywhere - and the system would
+#   never know they were registered. They are not a rare case and they are
+#   not a safe one to lose: in the training data 191 of 9,761 records are
+#   students with no event of any kind by the cut day, and 99.0 per cent of
+#   them did not finish.
 #
-# Neither has a rule of its own in university_rules.py yet. The cumulative
-# average is collected by the interface and shown to the advisor, and nothing
-# in the code reads it. Attendance is not collected at all: check_absence
-# counts sessions missed, which is a different quantity from the percentage
-# attended, and that rule is silent here because this data has no absence
-# column. Saying either of them is "applied as a rule" would not be true.
-#
-# WHEN DATA ARRIVES THAT CONTAINS THEM:
-#   1. move the two names from here into MODEL_INDICATORS above
-#   2. make sure the training file has a column with each of those names
-#   3. in app.py, add them to the dictionary in to_model_indicators
-#   4. run train_models.py again, then evaluate.py
-WAITING_FOR_DATA = [
-    "cumulative_gpa",     # 0.00 to 4.00
-    "attendance_rate",    # percentage of sessions attended in this course
+#   The enrolment row is what makes the cohort a cohort. It says this
+#   student is registered on this course, and it carries the few things
+#   about a student that are not events. The system builds its list of who
+#   to judge from those rows, so silence about a student becomes a reading
+#   of that student rather than their disappearance.
+
+# The columns an event file is read for. A file that does not carry one of
+# them is not rejected: the indicator built from it is left empty, and the
+# model was trained to read an empty cell as "not known" and to decide which
+# way to send it.
+EVENT_COLUMNS = [
+    "event_type",       # submission or activity
+    "item_id",          # which piece of work, or which page
+    "date_due",         # when the work was due        (submission)
+    "date_submitted",   # when it was handed in        (submission)
+    "score",            # the mark, out of 100         (submission)
+    "weight",           # its weight in the course     (submission)
+    "activity_type",    # what kind of page            (activity)
+    "date",             # the day of the visit         (activity)
+    "clicks",           # how many clicks that day     (activity)
 ]
 
+# The three columns that say whose record a row is.
+KEY_COLUMNS = [
+    "code_module",
+    "code_presentation",
+    "id_student",
+]
 
 # ---------------------------------------------------------------
-# Converting our university's numbers into the model's units
+# Adding an indicator
 # ---------------------------------------------------------------
-
-# A normal full time load. The Open University counts a normal year as 60
-# credits, we count a normal term as about 15, because a course is 3 credits
-# and a student usually takes five. So one of our credits stands for four of
-# theirs.
 #
-# This is the one conversion in the whole project that is a judgement rather
-# than a fact. We are saying a full load here means the same pressure as a
-# full load there. Reasonable, not proven, and the first thing to check
-# against real data from our own university.
-OUR_FULL_LOAD = 15
-THEIR_FULL_LOAD = 60
-CREDIT_FACTOR = THEIR_FULL_LOAD / OUR_FULL_LOAD
+# A university whose records carry a measurement this data does not have -
+# a cumulative grade point average, say, or an attendance rate - cannot get
+# a prediction out of it by adding the column to INDICATORS alone. A model
+# reads only what it was trained on, and handing a trained model a number it
+# has never seen gives noise rather than a prediction.
+#
+# The steps, in order:
+#   1. add the name to INDICATORS above
+#   2. make sure process_data.py builds a column with that name
+#   3. run process_data.py, then select_indicators.py, then
+#      check_indicators.py, because a new candidate can change which of the
+#      others still earn their place
+#   4. run train_models.py to save the model the system will use
