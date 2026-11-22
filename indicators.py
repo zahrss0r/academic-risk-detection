@@ -115,10 +115,18 @@ def from_events(events, students=None, cut_day=CUT_DAY):
         work["late_days"] = (pd.to_numeric(work["date_submitted"],
                                            errors="coerce")
                              - pd.to_numeric(work["date_due"], errors="coerce"))
+        # A total over a group whose values are all empty is not zero -
+        # it is not known, and the two are different facts here. A mean
+        # already answers that way; a sum does not, and returns 0 unless it
+        # is told to require at least one value. Without min_count a
+        # student whose submission weights cannot be read is handed to the
+        # model as one who submitted nothing of weight, which is the
+        # strongest signal of failure in the data and would be invented
+        # rather than measured.
         made = work.groupby(KEYS).agg(
             score_mean=("score", "mean"),
             score_std=("score", "std"),
-            weight_sum=("weight", "sum"),
+            weight_sum=("weight", lambda column: column.sum(min_count=1)),
             late_days_mean=("late_days", "mean"),
         ).reset_index()
         out = out.merge(made, on=KEYS, how="left")

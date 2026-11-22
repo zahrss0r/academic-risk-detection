@@ -68,6 +68,7 @@ WORDS = {
     "id_student":           ("رقم الطالب", "student number"),
     "code_module":          ("رمز المقرر", "course code"),
     "code_presentation":    ("الفصل الدراسي", "term"),
+    "event_type":           ("نوع السجل", "kind of record"),
 }
 
 # The qualification values as the records carry them, and what each one is
@@ -270,11 +271,15 @@ TEXT = {
                      "Fairness audit — on the validation set"),
     "ev_fair_note": ("هذه الأعمدة لا تُعطى للنموذج إطلاقاً. تُقرأ بعد أن "
                      "ينتهي، لمراجعته. والفحص على مجموعة التحقق لا على "
-                     "الاختبار، فمجموع كل خاصية ٢٢٤٣.",
+                     "الاختبار، فمجموع كل خاصية ٢٢٤٣ — عدا المستوى "
+                     "الاجتماعي، فمجموعه ٢١٤٥، لأن ٩٨ طالباً لا تحمل "
+                     "سجلاتهم قيمة له، ولا تُفترض لهم قيمة.",
                      "These columns are never given to the model. They "
                      "are read afterwards, to audit it. The audit runs "
                      "on the validation slice and not on the test slice, "
-                     "so each attribute totals 2,243."),
+                     "so each attribute totals 2,243 - except the deprivation band, "
+                     "which totals 2,145, because 98 students carry no "
+                     "value for it and none is assumed for them."),
     "ev_weight":    ("وزن كل مؤشر في القرار", "What each indicator carries"),
     "ev_small":     ("الفئة التي عدد طلابها أقل من خمسين تُعدّ ولا تُقاس: "
                      "خليّة فارغة تعني أننا لم نقِسها، لا أنها صفر.",
@@ -310,8 +315,9 @@ TEXT = {
                       "there is."),
     "gap_none":     ("لا يتوفر أي مؤشر في هذا الملف",
                      "No indicator is available in this file"),
-    "gap_no_id":    ("الملف لا يحمل رقم الطالب",
-                     "The file does not carry the student number"),
+    "gap_no_keys":  ("الملف لا يحمل أعمدة لا يقوم الفحص بدونها",
+                     "The file is missing columns the scan cannot run "
+                     "without"),
     "open_register": ("افتح السجل", "Open the register"),
     "search":       ("ابحث برقم الطالب", "Search by student number"),
     "back":         ("سجل الطلاب", "Register"),
@@ -421,11 +427,11 @@ TEXT = {
                         "Recall and precision for each group. The "
                         "precision gap between female and male students "
                         "is shown as it came out, not hidden."),
-    "chart_weight":    ("نصيب كل مؤشر من القرار. السلوك على المنصة يحمل "
-                        "أكثر مما تحمله الدرجة المبكرة.",
-                        "What each indicator carries of the decision. "
-                        "Behaviour on the platform carries more than the "
-                        "early mark does."),
+    "chart_weight":    ("نصيب كل مؤشر من القرار. الدرجة المبكرة وحدها "
+                        "تحمل قرابة نصفه، والخمسة الباقية تحمل الباقي.",
+                        "What each indicator carries of the decision. The "
+                        "early mark alone carries close to half of it, and "
+                        "the other five carry the rest."),
 }
 
 def count_students(n):
@@ -1398,6 +1404,7 @@ with tab_scan:
             # file at all, fails here rather than at the decode, so the
             # reading is guarded too and the same plain message is shown.
             table = None
+            missing_keys = []
             if contents != "":
                 try:
                     table, missing, missing_keys, unreadable = read_cohort(
@@ -1407,6 +1414,22 @@ with tab_scan:
                 if table is not None and len(table) == 0:
                     st.error(say("empty_file"))
                     table = None
+
+            # A file missing one of the columns the scan is built on is
+            # stopped here and named here, before anything else. There is
+            # no student to put in the register without a student number,
+            # and no record to read without the column that says what each
+            # row is. The advisor is told which column is absent, because a
+            # screen that does nothing and says nothing cannot be acted on.
+            if missing_keys:
+                rows = ('<div class="gaphead">' + say("gap_no_keys")
+                        + '</div><div class="gaplist">'
+                        + "<br>".join("\u00b7 " + word(x)
+                                      for x in missing_keys)
+                        + '</div><div class="gaplist">'
+                        + say("why_stopped") + '</div>')
+                st.markdown('<div class="box stopped">' + rows + '</div>',
+                            unsafe_allow_html=True)
 
             # A file that could not be read stops the scan, and nothing
             # more. The rest of the screen, including the shelf of files
@@ -1437,17 +1460,17 @@ with tab_scan:
                 # discovers indicators in whatever it is handed, which it
                 # does not. It knows six, and looks for those six.
                 #
-                # The scan stops for one of two reasons and only these.
-                # Without a student number there is nobody to name. With
-                # no indicator at all there is nothing to judge on: the
-                # model, handed a row of empty cells, returns the same
-                # number for every student in the file and would flag a
-                # whole cohort for no stated reason.
-                stop = len(missing_keys) > 0 or carried == 0
+                # A file that was read but yields no indicator at all is
+                # not put to the model. Handed a row of empty cells the
+                # model answers from the pattern it learned and nothing
+                # else, returning the same number for every student in the
+                # file, which would flag or clear a whole cohort for no
+                # stated reason. A file missing a column the scan needs was
+                # stopped and named above, before this point.
+                stop = carried == 0
 
                 if stop:
-                    why = (say("gap_no_id") if len(missing_keys) > 0
-                           else say("gap_none"))
+                    why = say("gap_none")
                     rows = ('<div class="gaphead">' + why + '</div>'
                             '<div class="gaplist">' + say("why_stopped")
                             + '</div>')
@@ -1613,8 +1636,12 @@ with tab_scan:
                     st.session_state["found"] = found
                     st.session_state["file_now_name"] = str(
                         run["file_name"])
-                    st.session_state["ran_on"] = plain_date(
-                        str(run["ran_on"]))
+                    # This is a new scan and it is stored as one, so the
+                    # screen carries the moment it ran. Reading the date off
+                    # the run it was opened from would put the older scan
+                    # time on a result produced now.
+                    st.session_state["ran_on"] = \
+                        datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
                     st.session_state["stored"] = None
                     st.session_state["run_id"] = keep_scan(
                         str(run["file_name"]), table, found, stored_carried)

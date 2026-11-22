@@ -76,15 +76,21 @@ CUT_DAY = 110
 # advisor's decision and not the system's. The two mistakes are not worth
 # the same, so the threshold is not left at its default.
 #
-# At 0.20, on the held-out test slice: recall 0.8951, precision 0.6146, 94
-# students missed out of 896, and 503 false alarms. At 0.50 the same model
-# misses 256. The whole table of eleven thresholds is in
-# results_threshold_table.csv and the report prints all of it, not only this
-# row.
+# At 0.20, on the held-out test slice: recall 0.8984, precision 0.6159, 91
+# students missed out of 896, and 502 false alarms. These are the figures in
+# results_final.csv, written by the single opening of the test slice. The
+# whole table of eleven thresholds is in results_threshold_table.csv, on the
+# validation slice where the threshold was chosen, and the report prints all
+# of it rather than this row alone.
 #
-# A low threshold also turned out to be the fairer one. The widest gap in
-# recall between regions is 0.104 here against 0.189 at 0.30, and the gap on
-# disability widens steadily as the threshold is tightened.
+# A low threshold also turned out to be the fairer one. On the validation
+# slice, where every threshold was tried, the widest gap in recall between
+# regions is 0.161 at 0.20 against 0.189 at 0.30, and the gap on disability
+# widens steadily as the threshold is tightened. On the test slice at 0.20
+# the same gap is 0.104 by region and 0.121 by deprivation band. Both slices
+# are named because the figures differ between them, and only the validation
+# figures can be checked against results_fairness.csv, which is the file
+# that ships.
 ALERT_THRESHOLD = 0.20
 
 # There is one threshold and no bands above it. Sorting students into high,
@@ -108,6 +114,10 @@ ALERT_THRESHOLD = 0.20
 #       late_days_mean      0.8722   (+0.0044)
 #       clicks_homepage     0.8751   (+0.0029)
 #       highest_education   0.8773   (+0.0022)
+#       score_std           0.8783   (+0.0010)
+#       clicks_dualpane     0.8796   (+0.0013)
+# and the ninth step lowered the figure by 0.0002, which is where the rule
+# stopped the path - at eight steps, not at the six listed below.
 #
 # Every candidate the path kept was then checked a second time on the
 # validation slice, which the selection never saw: train with it, train
@@ -115,6 +125,12 @@ ALERT_THRESHOLD = 0.20
 # moves. A candidate earns its place only if it raises ROC-AUC on data it
 # was not chosen on. The check is check_indicators.py and its table is
 # results_indicator_check.csv.
+#
+# Two of the eight did not earn it. score_std and clicks_dualpane each cost
+# 0.0005 on the validation slice when added, so the forward path kept them
+# and the second check removed them. That is why this list holds six while
+# the path held eight: the rule above says where the path stopped, and the
+# removal check says what survived it.
 #
 # Two things worth knowing about the list. One indicator carries most of it:
 # score_mean alone takes the model from 0.50 to 0.813, and the other five
@@ -143,8 +159,10 @@ INDICATORS = [
 #
 # It does, partly, and the figures say so: at a threshold of 0.20 on the
 # test slice the widest gap in recall is 0.026 by gender and 0.005 by age
-# band, but 0.104 by region and 0.121 by deprivation band. The model was
-# given none of those columns. The unevenness is in the study behaviour
+# band, but 0.104 by region and 0.121 by deprivation band. On the validation
+# slice, which is the one results_fairness.csv carries, the same gaps are
+# 0.029 by gender, 0.020 by age band, 0.161 by region and 0.096 by
+# deprivation band. The model was given none of those columns. The unevenness is in the study behaviour
 # itself, which differs between regions, and the report states it as it is.
 AUDIT_ONLY_COLUMNS = [
     "gender",
@@ -182,6 +200,12 @@ EVENT_ACTIVITY = "activity"       # one day's clicks on one page
 # them is not rejected: the indicator built from it is left empty, and the
 # model was trained to read an empty cell as "not known" and to decide which
 # way to send it.
+#
+# event_type is the exception, and the scan stops without it. It is not a
+# column an indicator is built from - it is the column that says what each
+# row is, so without it there is no submission to read and no visit to
+# count, and every indicator would be empty at once. A file that does not
+# carry it is named on the screen and the scan does not run.
 EVENT_COLUMNS = [
     "event_type",       # submission or activity
     "item_id",          # which piece of work, or which page
