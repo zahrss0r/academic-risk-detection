@@ -168,6 +168,26 @@ def from_events(events, students=None, cut_day=CUT_DAY):
     return out
 
 
+def missing_keys(events):
+    """
+    The columns a cohort file must carry before anything can be read.
+
+    Without a student number there is nobody to put in the register and
+    nobody to notify, so the scan would have no subject at all. Without
+    event_type no row can be told from another, and the whole file is one
+    undivided block. These are reported, never filled in.
+
+    The rule lives here, in the file that reads cohort files, so that the
+    application and the test ask the same question rather than each
+    carrying its own copy of the answer.
+    """
+    found = [name for name in settings.KEY_COLUMNS
+             if name not in events.columns]
+    if "event_type" not in events.columns:
+        found = found + ["event_type"]
+    return found
+
+
 def which_are_empty(table):
     """
     Which indicators this cohort has no value for, and for how many rows.

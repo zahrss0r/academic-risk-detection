@@ -56,25 +56,11 @@ def create_tables():
     # system that owns it, or it does not belong in it.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS student (
-            student_id        TEXT PRIMARY KEY,
-            credits_this_term INTEGER,
-            first_seen        TEXT
+            student_id TEXT PRIMARY KEY,
+            first_seen TEXT
         )
     """)
 
-    # Many rows per student, one for every notice the system issued. This is
-    # the one to many relationship in the entity relationship diagram.
-    #
-    # The columns follow the system exactly:
-    #   probability      what the model gave this student, between 0 and 1
-    #   reason           the sentence the advisor was shown, computed from
-    #                    that student's own row and stored as it was shown
-    #   indicators_read  how many of the indicators carried a value, so a
-    #                    notice can be read later knowing how much of the
-    #                    picture the system actually had
-    #   state            'waiting' or 'sent'. There is no third state: the
-    #                    system notifies and stops, so what the advisor did
-    #                    afterwards is not stored here.
     # Every file that was ever uploaded, kept whole.
     #
     # fingerprint is worked out from the contents, not the name. Two files
@@ -127,6 +113,19 @@ def create_tables():
         )
     """)
 
+    # Many rows per student, one for every notice the system issued. This is
+    # the one to many relationship in the entity relationship diagram.
+    #
+    # The columns follow the system exactly:
+    #   probability      what the model gave this student, between 0 and 1
+    #   reason           the sentence the advisor was shown, computed from
+    #                    that student's own row and stored as it was shown
+    #   indicators_read  how many of the indicators carried a value, so a
+    #                    notice can be read later knowing how much of the
+    #                    picture the system actually had
+    #   state            'waiting' or 'sent'. There is no third state: the
+    #                    system notifies and stops, so what the advisor did
+    #                    afterwards is not stored here.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS notice (
             notice_id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -146,21 +145,17 @@ def create_tables():
     connection.close()
 
 
-def save_student(student_id, credits_this_term, first_seen):
+def save_student(student_id, first_seen):
     # Adds the student if new and leaves the first date alone if not.
-    # "INSERT OR IGNORE" then "UPDATE" does both: the credits follow the
-    # newest file read, and first_seen stays the day we first saw them.
+    # "INSERT OR IGNORE" does exactly that: a student already in the table
+    # keeps the day we first saw them, however many files they appear in.
     connection = connect()
     cursor = connection.cursor()
 
     cursor.execute("""
-        INSERT OR IGNORE INTO student
-            (student_id, credits_this_term, first_seen)
-        VALUES (?, ?, ?)
-    """, (student_id, credits_this_term, first_seen))
-    cursor.execute("""
-        UPDATE student SET credits_this_term = ? WHERE student_id = ?
-    """, (credits_this_term, student_id))
+        INSERT OR IGNORE INTO student (student_id, first_seen)
+        VALUES (?, ?)
+    """, (student_id, first_seen))
 
     connection.commit()
     connection.close()
@@ -341,77 +336,6 @@ def save_notice(student_id, course_code, made_on, day_of_term,
 
     connection.commit()
     connection.close()
-
-
-def get_notices(student_id):
-    # Every notice issued for one student, newest first.
-    connection = connect()
-
-    history = pd.read_sql_query("""
-        SELECT made_on, course_code, day_of_term, reason,
-               probability, indicators_read, state
-        FROM notice
-        WHERE student_id = ?
-        ORDER BY notice_id DESC
-    """, connection, params=(student_id,))
-
-    connection.close()
-    return history
-
-
-def count_notices():
-    # How many notices are saved in total.
-    connection = connect()
-    cursor = connection.cursor()
-    cursor.execute("SELECT COUNT(*) FROM notice")
-    total = cursor.fetchone()[0]
-    connection.close()
-    return total
-
-
-def count_students():
-    connection = connect()
-    cursor = connection.cursor()
-    cursor.execute("SELECT COUNT(*) FROM student")
-    total = cursor.fetchone()[0]
-    connection.close()
-    return total
-
-
-def export_tables():
-    # Writes the tables out as plain CSV next to the database file.
-    #
-    # predictions.db is a real database file, which is what the submission
-    # asks for, but it is binary: double clicking it opens nothing useful.
-    # These CSV files hold exactly the same rows in a form anybody can open
-    # in Excel without installing a thing, so the contents can be read
-    # without taking our word for what is in there.
-    #
-    # The uploaded files themselves are left out of this export on purpose.
-    # They are whole cohort files sitting in one column, and writing them
-    # into a CSV would produce something nobody can read. The list of which
-    # files are stored goes out instead, without their contents.
-    connection = connect()
-
-    students = pd.read_sql_query("SELECT * FROM student", connection)
-    notices = pd.read_sql_query("SELECT * FROM notice", connection)
-    files = pd.read_sql_query("""
-        SELECT file_id, file_name, fingerprint, size_bytes, rows_in_file,
-               uploaded_on
-        FROM cohort_file
-    """, connection)
-    runs = pd.read_sql_query("SELECT * FROM scan_run", connection)
-    results = pd.read_sql_query("SELECT * FROM scan_result", connection)
-
-    connection.close()
-
-    students.to_csv(settings.project_file("table_student.csv"), index=False)
-    notices.to_csv(settings.project_file("table_notice.csv"), index=False)
-    files.to_csv(settings.project_file("table_cohort_file.csv"), index=False)
-    runs.to_csv(settings.project_file("table_scan_run.csv"), index=False)
-    results.to_csv(settings.project_file("table_scan_result.csv"), index=False)
-
-    return len(students), len(notices)
 
 
 def notices_already_sent():

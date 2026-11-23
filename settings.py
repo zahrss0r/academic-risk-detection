@@ -134,8 +134,9 @@ ALERT_THRESHOLD = 0.20
 #
 # Two things worth knowing about the list. One indicator carries most of it:
 # score_mean alone takes the model from 0.50 to 0.813, and the other five
-# add the rest. And six beat all seventy-one together, because the longer
-# list was mostly the same fact told several different ways.
+# add the rest. And six beat the eight the path had kept: 0.8714 against
+# 0.8699 on the validation slice, because the last two were the same fact
+# told a second way.
 #
 # WHAT THE EXPERIMENT DID NOT CHOOSE
 #   Not one column about who the student is. Gender, region, deprivation
@@ -162,8 +163,9 @@ INDICATORS = [
 # band, but 0.104 by region and 0.121 by deprivation band. On the validation
 # slice, which is the one results_fairness.csv carries, the same gaps are
 # 0.029 by gender, 0.020 by age band, 0.161 by region and 0.096 by
-# deprivation band. The model was given none of those columns. The unevenness is in the study behaviour
-# itself, which differs between regions, and the report states it as it is.
+# deprivation band. The model was given none of those columns. The
+# unevenness is in the study behaviour itself, which differs between
+# regions, and the report states it as it is.
 AUDIT_ONLY_COLUMNS = [
     "gender",
     "region",
@@ -238,7 +240,7 @@ KEY_COLUMNS = [
 # The steps, in order:
 #   1. add the name to INDICATORS above
 #   2. make sure process_data.py builds a column with that name
-#   3. run process_data.py, then select_indicators.py, then
-#      check_indicators.py, because a new candidate can change which of the
-#      others still earn their place
+#   3. run process_data.py, then select_indicators_full.py from the
+#      experiment folder, then check_indicators.py, because a new candidate
+#      can change which of the others still earn their place
 #   4. run train_models.py to save the model the system will use

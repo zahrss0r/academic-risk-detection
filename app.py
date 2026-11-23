@@ -54,13 +54,9 @@ INDICATORS = settings.INDICATORS
 # are for the code; these are what a person reads.
 WORDS = {
     "score_mean":           ("متوسط الدرجات حتى الآن", "mean mark so far"),
-    "score_mean_missing":   ("لا توجد درجة مرصودة", "no mark recorded yet"),
     "weight_sum":           ("وزن ما سُلِّم من الأعمال",
                              "weight of work handed in"),
-    "weight_sum_missing":   ("لم يُسلّم شيئاً", "nothing handed in at all"),
     "visit_day_last":       ("يوم آخر دخول للمنصة", "day of the last visit"),
-    "visit_day_last_missing": ("لم يفتح المنصة إطلاقاً",
-                               "never opened the platform"),
     "late_days_mean":       ("متوسط أيام التأخير", "mean days late"),
     "clicks_homepage":      ("نقرات صفحة المقرر",
                              "clicks on the course page"),
@@ -115,10 +111,6 @@ TEXT = {
     "no_file":      ("لم يُرفع ملف بعد.", "No file yet."),
     "run":          ("ابدأ الفحص", "Run the scan"),
     "scanning":     ("جاري الفحص", "Scanning"),
-    "gap_keys":     ("أعمدة الهوية غير الموجودة في الملف",
-                     "Identity columns this file does not carry"),
-    "cannot_scan":  ("لا يمكن فحص هذا الملف",
-                     "This file cannot be scanned"),
     "why_stopped":  ("لا يُنذَر عن طالب لا يُعرف رقمه، ولا يُبنى إنذار على "
                      "ملف لا يُبنى منه مؤشر واحد. أضف ما "
                      "ينقص أدناه وارفع الملف مرة أخرى.",
@@ -132,25 +124,13 @@ TEXT = {
     "gap_text_note": ("قُرئت كقيمة مجهولة، لا كصفر — كما يُقرأ أي نقص آخر.",
                       "They were read as not known, not as a zero, the "
                       "same as any other gap."),
-    "gap_cols":     ("مؤشرات لا يحملها الملف",
-                     "Indicators this file does not carry"),
-    "cols_missing": ("أُبلغ النموذج أنها مجهولة ولم تُعطَ صفراً.",
-                     "The model was told these are unknown, not given a "
-                     "zero."),
     "students":     ("طلاب", "students"),
-    "rows":         ("سجلات مقرر", "course records"),
     "flagged":      ("منذَر عنهم", "flagged"),
     "clear":        ("لا شيء عليهم", "clear"),
     "no_value":     ("لا توجد قيمة", "no value"),
     "flagged_block": ("الطلاب المنذَر عنهم — ومؤشرات كل واحد",
                       "The students flagged, and what was read for each"),
     "student":      ("الطالب", "Student"),
-    "courses":      ("المقررات", "courses"),
-    "failing_in":   ("متعثر في", "in trouble in"),
-    "pick":         ("اختر طالباً لعرض سجله", "Pick a student to open the record"),
-    "why":          ("لماذا ظهر هذا الطالب", "Why this student appears"),
-    "read_n":       ("قرأ النظام {n} من {total} مؤشرات لهذا السجل",
-                     "The system read {n} of {total} indicators for this record"),
     "prob":         ("احتمال التعثر", "Probability"),
     "state":        ("حالة الإنذار", "Notice"),
     "waiting":      ("في الانتظار", "waiting"),
@@ -161,8 +141,6 @@ TEXT = {
                      "شأن النظام ولا يُسجَّل فيه.",
                      "The system's part ends here. What the advisor does next "
                      "is not the system's business and is not recorded in it."),
-    "silent_ok":    ("صحيحة ولا تنطبق على أحد عند هذا اليوم",
-                     "correct, and catches nobody on this day"),
     "ev_what":      ("هذه الأرقام تصف النموذج نفسه، لا الملف الذي تفحصه، "
                      "ولا تتغير بتغيّر الدفعة — لأن الفصل الجاري لم تُعرف "
                      "نتيجته بعد.\n\n"
@@ -287,8 +265,6 @@ TEXT = {
                      "not scored: an empty cell means we did not measure "
                      "it, not that it is zero."),
     "lang":         ("English", "العربية"),
-    "committee":    ("لجنة الإشراف الأكاديمي", "Academic Supervision Committee"),
-    "role":         ("حساب اللجنة", "Committee account"),
     "src_file_sub": ("ملف الدفعة بصيغة مفصولة بفواصل",
                      "A cohort file in comma separated form"),
     "src_db_sub":   ("قراءة مباشرة من سجلات الجامعة",
@@ -318,7 +294,6 @@ TEXT = {
     "gap_no_keys":  ("الملف لا يحمل أعمدة لا يقوم الفحص بدونها",
                      "The file is missing columns the scan cannot run "
                      "without"),
-    "open_register": ("افتح السجل", "Open the register"),
     "search":       ("ابحث برقم الطالب", "Search by student number"),
     "back":         ("سجل الطلاب", "Register"),
     "nobody":       ("لا يوجد طالب بهذا الرقم", "No student with that number"),
@@ -353,7 +328,6 @@ TEXT = {
                      "دون إعادة فحص.",
                      "A stored result from {when}, read back as it was "
                      "written on the day, without scanning again."),
-    "pick_run":     ("اختر عملية فحص", "Pick a scan"),
     "drag":         ("اضغط الزر لاختيار ملف من جهازك، أو اسحب الملف وأفلته "
                      "داخل الإطار.",
                      "Use the button to pick a file from your computer, or "
@@ -375,9 +349,8 @@ TEXT = {
                      "This file carries no records at all."),
 
     # Column headings. Each one names what is in its own column and
-    # nothing else. An earlier version headed the file name with "a file
-    # I upload" and the date with "pick a scan", which were the labels of
-    # the controls that produced them, not descriptions of the columns.
+    # nothing else: a heading describes the column, not the control that
+    # produced it.
     "col_file":     ("الملف", "File"),
     "col_when":     ("وقت الفحص", "Scanned at"),
     "col_students": ("عدد الطلاب", "Students"),
@@ -392,7 +365,6 @@ TEXT = {
     "col_indicator": ("المؤشر", "Indicator"),
     "col_value":    ("قيمته على هذا السجل", "its value on this record"),
     "col_share":    ("نصيبه من القرار", "share of the decision"),
-    "col_raw":      ("الوزن الخام", "raw importance"),
     "col_group":    ("الفئة", "Group"),
     "col_threshold": ("الحد الفاصل", "Threshold"),
     "m_recall":     ("الاستدعاء", "Recall"),
@@ -404,8 +376,6 @@ TEXT = {
     "grp_age_band_55<=":  ("٥٥ فأكثر", "55 and over"),
     "grp_disability_True":  ("بإعاقة مسجَّلة", "disability recorded"),
     "grp_disability_False": ("بلا إعاقة مسجَّلة", "no disability recorded"),
-    "yes":          ("نعم", "yes"),
-    "no":           ("لا", "no"),
     "against_threshold": ("مقابل حد الإنذار {t}", "against the alert threshold of {t}"),
     "push_note":    ("أقوى {n} مؤشرات دفعت نحو الإنذار، وتحمل {total}٪ من "
                      "القرار. الباقي موزَّع على بقية المؤشرات.",
@@ -733,11 +703,6 @@ def plain_date(text):
     return "⁦" + str(text) + "⁩"
 
 
-def joiner():
-    """The list separator of the language on screen."""
-    return "، " if st.session_state["lang"] == "ar" else ", "
-
-
 def word(name):
     """The plain name of one indicator."""
     pair = WORDS.get(name, (name, name))
@@ -824,12 +789,9 @@ def read_cohort(source):
         source.seek(0)
         events = pd.read_csv(source, encoding="cp1256")
 
-    # Without a student number there is nobody to put in the register and
-    # nobody to notify, so the scan would have no subject at all. These
-    # are reported, never filled in.
-    missing_keys = [n for n in KEY_COLUMNS if n not in events.columns]
-    if "event_type" not in events.columns:
-        missing_keys = missing_keys + ["event_type"]
+    # The columns the file must carry before anything can be read. The
+    # rule is in indicators.py, beside the reading it guards.
+    missing_keys = build.missing_keys(events)
     if missing_keys:
         return None, [], missing_keys, {}
 
@@ -839,21 +801,6 @@ def read_cohort(source):
     missing = [name for name in INDICATORS
                if name not in table.columns or table[name].isna().all()]
     return table, missing, [], {}
-
-
-def column_has_values(table, name, missing):
-    """Is this indicator built, and does it hold anything?
-
-    Three separate things can be true of an indicator and only one of
-    them means the model has something to read. It can be absent. It can
-    have been built and come out empty, because the file carried nothing
-    to build it from. Or it can be there with nothing in it, which looks
-    like a working column and would let a file of nothing but ID numbers
-    through the gate.
-    """
-    if name not in table.columns or name in missing:
-        return False
-    return bool(table[name].notna().any())
 
 
 def tile(number, label, colour, under=""):
@@ -963,7 +910,7 @@ def keep_scan(file_name, table, found, carried):
     # row here and two records in the scan, which is the whole point of
     # keeping the two apart.
     for who, part in table.groupby("id_student"):
-        database.save_student(str(who), None, when)
+        database.save_student(str(who), when)
 
     people = found.groupby("id_student")["flagged"].any()
 
@@ -1217,9 +1164,8 @@ def logo_tag():
         return ""
 
 # The bar carries the university's mark and the language switch, and
-# nothing else. An earlier version put an account name and initials
-# beside it, copied from the mock up: there is no sign in and there are
-# no user accounts here, so showing one would claim something untrue.
+# nothing else. There is no sign in and there are no user accounts here,
+# so an account name beside the mark would claim something untrue.
 #
 # The language switch sits here, across from the mark: in reach without a
 # panel of its own, and on the same side in both languages.
