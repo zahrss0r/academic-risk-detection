@@ -1,38 +1,13 @@
 """
-The interface of the Smart Academic Risk Detection System.
+Smart Academic Risk Detection System - the advisor interface.
 
-Three screens, and the order between them is the order of the work:
+Three screens: Scan reads a cohort file and flags students at risk,
+Register lists one row per student, and Evidence shows how the system
+performs.
 
-  1. Scan      - read a cohort file and find the students in trouble
-  2. Register  - one row per student, and what the trouble is per course
-  3. Evidence  - how well the system does, from the result files
-
-WHAT THIS SCREEN DOES AND WHERE IT STOPS
-The system reads a cohort's records, builds the six indicators, asks the
-model about every student, and tells the advisor who is at risk and what the
-model read to say so. Then it stops. It does not advise the advisor what to
-do, it does not record what the advisor decided, and it does not follow the
-case afterwards. Those belong to the advisor and the student.
-
-ONE JUDGEMENT PER STUDENT
-Every record is judged once, by the model, on the same six indicators. There
-is no second opinion to reconcile and no order of precedence to explain: one
-probability, one threshold, one answer, and the indicators that carried it
-shown beside it.
-
-WHAT THE FILE CARRIES AND WHAT THE SYSTEM DOES WITH IT
-The uploaded file is one row per event - a student registered, a piece of
-work handed in, a day's clicks on a page - exactly as a university system
-exports its records. The advisor aggregates nothing. The system cuts
-everything dated after the cut day, builds the six indicators itself, and
-scores.
-
-NOTHING IS INVENTED
-Every reason shown beside a student is computed from that student's own
-record. Where the file carries nothing to build an indicator from, the cell
-is left empty and the model is told it is empty rather than given a zero. A
-zero means "measured as none"; empty means "not known", and the model was
-trained to tell those apart.
+The uploaded file holds one row per event. The system drops events after
+the cut day, builds the six indicators, and scores every student. An
+indicator with no data is left empty, not set to zero.
 """
 
 import datetime
@@ -50,8 +25,7 @@ import indicators as build
 
 INDICATORS = settings.INDICATORS
 
-# Plain words for each indicator, in both languages. The model's column names
-# are for the code; these are what a person reads.
+# Indicator names in both languages, for display.
 WORDS = {
     "score_mean":           ("متوسط الدرجات حتى الآن", "mean mark so far"),
     "weight_sum":           ("وزن ما سُلِّم من الأعمال",
@@ -67,11 +41,8 @@ WORDS = {
     "event_type":           ("نوع السجل", "kind of record"),
 }
 
-# The qualification values as the records carry them, and what each one is
-# called in Arabic. The data is published in English, and an English word
-# sitting inside an Arabic sentence is the one thing this screen must not
-# do, so each value is given its Arabic name here. A value not listed is
-# shown as it stands rather than guessed at.
+# Arabic names for the qualification values. A value not listed here is
+# shown as it is.
 QUALIFICATIONS = {
     "No Formal quals":             "بدون مؤهل رسمي",
     "Lower Than A Level":          "أقل من الثانوية",
@@ -80,8 +51,7 @@ QUALIFICATIONS = {
     "Post Graduate Qualification": "مؤهل دراسات عليا",
 }
 
-# The unit each indicator is measured in, so a number is never printed on
-# screen without saying what it is a number of.
+# The unit each indicator is measured in.
 UNITS = {
     "score_mean":      ("من 100", "out of 100"),
     "weight_sum":      ("من 100", "out of 100"),
@@ -164,10 +134,7 @@ TEXT = {
                      "opened once, after everything was fixed."),
     "ev_test":      ("الاختبار النهائي — فُتح مرة واحدة",
                      "The final test — opened once"),
-    # --- the seven sections of the performance page, in the order they
-    #     are read: where the indicators came from, what the model reads,
-    #     why this algorithm, why this threshold, is it even-handed, and
-    #     last of all the result.
+    # The seven sections of the performance page, in display order.
     "ev_chosen":    ("من أين جاءت المؤشرات الستة",
                      "Where the six indicators came from"),
     "ev_chosen_note": ("عُرض كل عمود في البيانات الخام — واحد وسبعون "
@@ -271,8 +238,7 @@ TEXT = {
                      "Read straight from the university's records"),
     "ready":        ("متاح", "available"),
     "not_ready":    ("غير متاح", "not available"),
-    # The three stages of a scan, as the advisor sees them. What the
-    # system does inside each one is its own business.
+    # The three stages of a scan, as shown to the advisor.
     "step1":        ("تهيئة البيانات", "Prepare the data"),
     "step2_":       ("مسح البيانات", "Scan"),
     "step3_":       ("النتيجة", "Result"),
@@ -348,9 +314,7 @@ TEXT = {
     "empty_file":   ("الملف لا يحتوي على أي سجل.",
                      "This file carries no records at all."),
 
-    # Column headings. Each one names what is in its own column and
-    # nothing else: a heading describes the column, not the control that
-    # produced it.
+    # Column headings.
     "col_file":     ("الملف", "File"),
     "col_when":     ("وقت الفحص", "Scanned at"),
     "col_students": ("عدد الطلاب", "Students"),
@@ -405,14 +369,9 @@ TEXT = {
 }
 
 def count_students(n):
-    """A count of students, written the way each language writes it.
+    """A count of students, with the right Arabic plural form.
 
-    Arabic does not put a plural after every number the way English does:
-    one is طالب واحد, two is طالبان, three to ten take the plural طلاب,
-    and eleven upwards take the singular again in the accusative, طالباً.
-    Printing "94 طلاب" is the kind of mistake that makes a careful reader
-    stop trusting the rest of the screen, so the four cases are written
-    out here once and used everywhere a count of students is shown.
+    Arabic has four forms: one, two, three to ten, and eleven upwards.
     """
     if st.session_state["lang"] != "ar":
         return str(n) + (" student" if n == 1 else " students")
@@ -459,9 +418,7 @@ def count_indicators(seen, total):
         word_seen = "مؤشراً واحداً"
     return "قرأ النظام " + word_seen + " من " + str(total) + " لهذا السجل"
 
-# The look of the system. These are the same colours, font and shapes as the
-# simulation the committee was shown, so the working system and the
-# simulation are recognisably the one thing. The green is the university's.
+# Page styling: colours, font and shapes.
 STYLE = """
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -640,10 +597,8 @@ button, input, select, textarea { font-family: var(--font); }
 </style>
 """
 
-# The values inside the result tables, in both languages. It sits
-# here, beside the other word tables, because the chart under a
-# table reads it too - and a name must not say one thing in a table
-# and another in the chart beneath it.
+# Values inside the result tables, in both languages. The tables and the
+# charts both read this, so a value reads the same in each.
 CELLS = {
     "random (final test)": ("الشريحة المحجوزة — فُتحت مرة واحدة",
                             "the held-out slice, opened once"),
@@ -651,13 +606,10 @@ CELLS = {
     "keeps its place": ("بقي", "stayed"),
     "not confirmed": ("لم يُثبت نفسه", "did not hold up"),
     # The three columns the fairness audit reads, and their values.
-    # The published data writes them as gender / F / True; on screen
-    # they are written the way a committee would say them.
     "gender": ("الجنس", "gender"),
     "region": ("المنطقة", "region"),
     "imd_band": ("المستوى الاجتماعي", "deprivation band"),
-    # The regions as the data publishes them. An English place name
-    # inside an Arabic table is still an English word on the page.
+    # The regions as the data publishes them, with Arabic names.
     "East Anglian Region": ("شرق أنجليا", "East Anglian Region"),
     "East Midlands Region": ("شرق الميدلاندز", "East Midlands Region"),
     "Ireland": ("أيرلندا", "Ireland"),
@@ -692,13 +644,9 @@ def say(key, **kw):
     return text
 
 def plain_date(text):
-    """A date and time that reads the same in both languages.
+    """A date and time marked left to right.
 
-    A browser laying out Arabic reorders a run of digits and dashes by its
-    own rules, so "2026-11-08 16:17" came out as "16:17 08-11-2026" in the
-    middle of an Arabic sentence: the time first and the day and year
-    swapped. Marking the stamp left to right stops that, and the same
-    stamp then reads the same wherever it appears.
+    Without the marks, a browser reorders digits and dashes inside Arabic.
     """
     return "⁦" + str(text) + "⁩"
 
@@ -713,15 +661,9 @@ def word(name):
 
 @st.cache_resource
 def load_model():
-    """
-    The trained model and what it needs in order to read a cohort.
-
-    The six indicator names, the qualification list from the training
-    data, the threshold and the cut day are saved alongside the model
-    itself. They travel together on purpose: a model separated from the
-    list of what it was trained on can be fed the wrong columns in the
-    wrong order without anything going visibly wrong.
-    """
+    """The trained model, the six indicator names, the qualification list,
+    the threshold and the cut day. They are saved together so the model is
+    never fed the wrong columns in the wrong order."""
     return joblib.load(settings.project_file("final_model.pkl"))
 
 
@@ -752,29 +694,19 @@ def value_shown(row, name):
     text = format(float(value), ".0f")
     return text + " " + unit(name) if unit(name) else text
 
-# The three columns that identify a record: which student, which course,
-# which term. Everything else the system can do without.
+# The three columns that identify a record.
 KEY_COLUMNS = ["id_student", "code_module", "code_presentation"]
 
 
 def read_cohort(source):
     """Read a cohort file and build one row per student per course.
 
-    The file is one row per event - a student registered, a piece of work
-    handed in, a day's clicks on a page - the way a university system
-    exports its records. The advisor aggregates nothing and uploads no
-    table of indicators: the system cuts everything dated after the cut
-    day, builds the six indicators itself, and scores.
+    The file holds one row per event. The system drops events after the cut
+    day, builds the six indicators, and leaves an indicator empty when the
+    file gives nothing to build it from.
 
-    An indicator the file gives nothing to build from is left empty, not
-    set to zero. The model was trained to read an empty cell as "not
-    known" and to decide which way to send it, so telling it the truth is
-    better than filling the gap with a number nobody measured.
-
-    Returns the built table, the indicators it could not build, the
-    identity columns the file does not carry, and nothing unreadable -
-    because a value that cannot be read becomes an empty cell during the
-    building and is counted there.
+    Returns the table, the indicators it could not build, and the identity
+    columns the file does not carry.
     """
     try:
         if isinstance(source, str):
@@ -782,15 +714,12 @@ def read_cohort(source):
         else:
             events = pd.read_csv(source, encoding="utf-8-sig")
     except UnicodeDecodeError:
-        # A file exported from Excel on Windows is often not in UTF-8.
-        # Reading it blindly throws an error about bytes, which tells the
-        # advisor nothing, so the usual Windows encoding is tried before
-        # giving up.
+        # A file exported from Excel on Windows is often not UTF-8, so the
+        # usual Windows encoding is tried next.
         source.seek(0)
         events = pd.read_csv(source, encoding="cp1256")
 
-    # The columns the file must carry before anything can be read. The
-    # rule is in indicators.py, beside the reading it guards.
+    # The columns the file must carry. The rule lives in indicators.py.
     missing_keys = build.missing_keys(events)
     if missing_keys:
         return None, [], missing_keys, {}
@@ -804,12 +733,8 @@ def read_cohort(source):
 
 
 def tile(number, label, colour, under=""):
-    """One counting tile.
-
-    `under` is a second, quieter line beneath the label - a share, where
-    a bare count does not say much on its own. 151 means little; 151 out
-    of 217 means something.
-    """
+    """One counting tile. `under` is a second, smaller line below the
+    label, used for a share."""
     css = "tile " + colour if colour else "tile"
     tail = '<div class="u">' + under + '</div>' if under else ""
     return ('<div class="' + css + '"><div class="n">' + str(number)
@@ -825,9 +750,8 @@ def register_rows(people, found):
             say("student"): str(who),
             say("col_failing"): len(bad),
             say("col_courses"): len(mine),
-            # Keyed by the student number as text. The database returns
-            # it as text and the cohort file reads it as a number, and a
-            # notice sent yesterday has to be recognised either way.
+            # Keyed by the student number as text, because the database returns
+            # text and the cohort file returns a number.
             say("state"): (say("sent")
                            if str(who) in st.session_state["sent"]
                            else say("waiting")),
@@ -855,22 +779,14 @@ def indicators_read(row):
 # The scan
 
 def scan(table, box, carried):
-    """The whole scan, in the order the system is built on.
+    """Run the scan. `carried` is how many of the six indicators were built.
 
-    carried is how many of the six indicators the file let us build.
-
-    Every record goes to the model and gets one probability against one
-    threshold. There is no record that skips it and no record decided
-    some other way, which is why the result needs no column saying how it
-    was reached.
+    Every record gets one probability against one threshold.
     """
     found = table.copy()
 
-    # A file that let us build no indicator at all is not put to the
-    # model. Asked about a row of empty cells the model answers from the
-    # pattern it learned and nothing else, so it returns the same number
-    # for every student in the file - which would flag or clear a whole
-    # cohort with nothing behind it. The scan says so instead.
+    # A file with no indicator at all is not sent to the model: it would
+    # return the same probability for every student.
     found["probability"] = np.nan
     if carried > 0:
         frame = build.for_the_model(
@@ -889,26 +805,18 @@ def scan(table, box, carried):
 
 
 def keep_scan(file_name, table, found, carried):
-    """Store the file, the run and everything the run flagged.
+    """Store the file, the run and every flagged record.
 
-    The file is stored so it can be scanned again later, trimmed to the
-    columns the system reads. The results go in with the reason already
-    written out, so an old scan reads exactly as it read on the day rather
-    than being worked out again from a model that may have changed since.
+    The reason is stored as written, so an old scan reads as it did then.
     """
     when = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    # The uploaded file is stored as it arrived, so the same scan can be
-    # run again later. It carries events and nothing identifying a person
-    # beyond the student number the university already holds.
+    # The uploaded file is stored as it arrived, so it can be scanned again.
     contents = st.session_state.get("file_text", "")
     file_id = database.save_file(file_name, contents, len(found), when)
 
-    # Every student the file carries, flagged or not, gets a row. The
-    # notice table points at this one, so a notice with no student behind
-    # it would be a notice about nobody. A student on two courses has one
-    # row here and two records in the scan, which is the whole point of
-    # keeping the two apart.
+    # Every student in the file gets a row, flagged or not, because the
+    # notice table points at this one.
     for who, part in table.groupby("id_student"):
         database.save_student(str(who), when)
 
@@ -925,11 +833,8 @@ def keep_scan(file_name, table, found, carried):
         row = found.iloc[i]
         if not row["flagged"]:
             continue
-        # The reason is the handful of indicators that pushed this record
-        # towards an alert, and it is written down here rather than worked
-        # out again later. A stored scan has to read as it read on the
-        # day: the model may be retrained, and an old notice must not
-        # quietly change its mind afterwards.
+        # The reason is written down now rather than worked out later, so a
+        # stored scan does not change if the model is retrained.
         said = both_languages(model_reason_line, row, load_model())
 
         rows.append({
@@ -947,13 +852,8 @@ def keep_scan(file_name, table, found, carried):
 
 
 def both_languages(maker, row, model=None):
-    """One reason, written in Arabic and in English.
-
-    A stored record outlives the language it was written in, and the
-    language on screen at the moment of a scan says nothing about the
-    language it will be read in. Both are written down, and the screen
-    picks the one it needs.
-    """
+    """One reason, written in Arabic and in English, because a stored
+    record may be read in either language."""
     was = st.session_state["lang"]
     out = {}
     for lang in ["ar", "en"]:
@@ -964,11 +864,8 @@ def both_languages(maker, row, model=None):
 
 
 def stored_reason(part):
-    """The stored reason, in the language on screen.
-
-    Rows written before the English column existed fall back to the one
-    reason they have, rather than showing an empty cell.
-    """
+    """The stored reason, in the language on screen. Rows without an English
+    column fall back to the one reason they have."""
     if st.session_state["lang"] == "ar" or "reason_en" not in part.columns:
         return part["reason"].values
     return [en if isinstance(en, str) and en != "" else ar
@@ -977,12 +874,9 @@ def stored_reason(part):
 
 
 def model_reasons(row, box, how_many=3):
-    """Which indicators pushed this record towards an alert, and by how much.
+    """Which indicators pushed this record towards an alert.
 
-    LightGBM gives the push of each indicator in log odds, which is not a
-    number to show anybody. So each push is reported as its share of the
-    total push on this record: a plain statement of which indicators carried
-    the decision, without pretending the units are marks or percentages.
+    Each push is reported as its share of the total push on the record.
     """
     one = build.for_the_model(row.to_frame().T,
                               education_levels=box["education_levels"])
@@ -1000,10 +894,7 @@ def model_reasons(row, box, how_many=3):
         name = INDICATORS[i]
         value = row[name]
 
-        # Each indicator is shown in the unit it is measured in, so a
-        # number never appears on screen without saying what it counts.
-        # An empty cell is named rather than printed as a dash: for this
-        # system an absence is a reading, and the strongest one it has.
+        # Each indicator is shown with its unit, and an empty cell is named.
         shown = value_shown(row, name)
 
         out.append({
@@ -1015,19 +906,9 @@ def model_reasons(row, box, how_many=3):
     return out
 
 def group_words(attribute, group):
-    """A name for one audited group, short enough to read under a bar.
+    """A short name for one audited group, to fit under a bar.
 
-    The audit's own labels are F, M, True, False, two age bands, the
-    thirteen regions and the ten deprivation bands. Put on a chart as
-    they are, half of them say nothing and the other half are English
-    words on an Arabic page, so each one is given a short plain name.
-    They are kept short on purpose: a long label is turned on its edge
-    by the chart and then cut off.
-
-    Three places are looked in, in order: the short chart name, then the
-    same table of values the tables themselves are translated with, then
-    the label as it stands. The middle one is what keeps a name from
-    reading one way in a table and another way in the chart beneath it.
+    Looks in the short chart names, then the table values, then the label.
     """
     key = "grp_" + attribute + "_" + group
     if key in TEXT:
@@ -1039,12 +920,8 @@ def group_words(attribute, group):
 
 
 def model_reason_line(row, box):
-    """The same reason, written as one line of text.
-
-    A stored scan and a sent notice have to carry the same justification,
-    because they are two records of one decision. Writing the line in one
-    place is what keeps them from drifting apart.
-    """
+    """The same reason as one line of text, used by the stored scan and by
+    the notice so both carry the same wording."""
     parts = []
     for push in model_reasons(row, box):
         parts.append(push["name"] + " — " + push["shown"]
@@ -1055,30 +932,25 @@ def model_reason_line(row, box):
 # ---------------------------------------------------------------
 # The page
 
-# The browser tab. Streamlit fixes this before the language is known, so
-# it carries both names rather than claiming the page is only English.
+# The browser tab, set before the language is known, so it carries both.
 st.set_page_config(page_title="الكشف المبكر عن التعثر · Academic Risk",
                    page_icon="🎓", layout="wide",
                    initial_sidebar_state="collapsed")
 
 if "lang" not in st.session_state:
     st.session_state["lang"] = "ar"
-# The tables are made before anything is read from them, because the very
-# first thing this screen does is ask which notices have already been sent.
+# The tables are created before anything is read from them.
 database.create_tables()
 
 if "sent" not in st.session_state:
-    # Read back from the database rather than started empty. A notice that
-    # was sent yesterday is a thing that happened, and closing the browser
-    # does not unhappen it.
+    # Read back from the database, because a notice sent earlier still stands.
     st.session_state["sent"] = database.notices_already_sent()
 if "found" not in st.session_state:
     st.session_state["found"] = None
 if "file_now" not in st.session_state:
     st.session_state["file_now"] = ""
 if "file_text" not in st.session_state:
-    # The uploaded file as it arrived, kept so it can be stored exactly as
-    # it was read and recognised again on a later upload.
+    # The uploaded file as it arrived, kept for storing and matching.
     st.session_state["file_text"] = ""
 if "run_id" not in st.session_state:
     st.session_state["run_id"] = None
@@ -1088,10 +960,8 @@ if "stored_when" not in st.session_state:
     st.session_state["stored_when"] = ""
 
 if st.session_state["lang"] == "ar":
-    # Arabic reads right to left, so the writing is turned round. The tables
-    # are left alone on purpose: a table of student numbers and percentages
-    # is read left to right in both languages, and turning the grid round
-    # pushes its first column off the edge of the screen.
+    # Arabic reads right to left. The tables are left alone, because turning
+    # the grid round pushes the first column off the screen.
     st.markdown("""
         <style>
         .stApp p, .stApp label, .stApp h1, .stApp h2, .stApp h3,
@@ -1152,9 +1022,7 @@ st.markdown(STYLE, unsafe_allow_html=True)
 
 @st.cache_data
 def logo_tag():
-    """The university's mark, read from the file and put straight into the
-    page. It is kept as a file rather than pasted into the code so the
-    university's own artwork is not edited by us."""
+    """The university logo, read from file and placed into the page."""
     import base64
     try:
         raw = open(settings.project_file("university_logo.svg"), "rb").read()
@@ -1163,24 +1031,13 @@ def logo_tag():
     except FileNotFoundError:
         return ""
 
-# The bar carries the university's mark and the language switch, and
-# nothing else. There is no sign in and there are no user accounts here,
-# so an account name beside the mark would claim something untrue.
-#
-# The language switch sits here, across from the mark: in reach without a
-# panel of its own, and on the same side in both languages.
+# The bar carries the logo and the language switch, and nothing else.
 switch, mark = st.columns([1, 5])
 with switch:
     if st.button(say("lang"), key="lang_switch"):
-        # Which tab the advisor is on, read before the language changes.
-        #
-        # Clicking a tab does not run the program: the strip handles it
-        # in the browser, and the only record of the choice is the
-        # strip's own state, under the key it was built with. That key
-        # carries the language in it, so a moment from now it will be a
-        # different key with nothing in it. The tab is read here, while
-        # the old key is still the live one, and kept as a position -
-        # which means the same tab in either language.
+        # Which tab the advisor is on, read before the language changes. The
+        # strip's key carries the language, so the old key is still live here.
+        # The tab is kept as a position, which means the same tab either way.
         here = st.session_state.get(
             "nav_" + st.session_state["lang"]
             + "_" + str(st.session_state["tab_nonce"]))
@@ -1192,9 +1049,7 @@ with switch:
                                     else "ar")
         st.rerun()
 with mark:
-    # The university's mark, and nothing beside it. The name of the
-    # committee is already on the banner underneath, and writing it twice
-    # on one screen said it no better the second time.
+    # The logo, and nothing beside it.
     st.markdown('<div class="nav"><span class="logo">' + logo_tag()
                 + '</span></div>', unsafe_allow_html=True)
 
@@ -1209,28 +1064,12 @@ st.markdown(
 
 box = load_model()
 
-# The scan screen can send the advisor straight to the register: a count
-# of flagged students is only useful if the students themselves are one
-# click away.
+# The scan screen can send the advisor straight to the register.
 #
-# WHY THE KEY CHANGES
-#   A tab strip remembers which tab the advisor chose, and that memory
-#   wins over anything the code asks for afterwards - which is right,
-#   because a screen that moved under someone's hand would be worse than
-#   one that did not move at all. Writing the wanted tab into the strip's
-#   own state does nothing: it stays where the advisor left it.
-#
-#   So when the code needs to move, it builds a NEW strip, with a new
-#   key and the wanted tab as its opening one. The old strip's memory
-#   belongs to the old key and does not apply. Between those moments the
-#   advisor's own clicks are untouched, because the key only changes when
-#   the code asks for a move.
-#   The wanted tab is remembered by its POSITION, never by its name. A
-#   name is the label on screen, and the label changes with the
-#   language: a tab remembered as "سجل الطلاب" is not among the tabs a
-#   moment after the advisor switches to English, and the page stops
-#   with an error instead of turning around. A position means the same
-#   thing in both languages.
+# A tab strip remembers the advisor's own choice, and that memory wins
+# over anything the code sets. So to move the strip, the code builds a
+# new one with a new key. The tab is held as a position, not a name,
+# because the name changes with the language.
 if "which_tab" not in st.session_state:
     st.session_state["which_tab"] = 0
 if "tab_nonce" not in st.session_state:
@@ -1245,45 +1084,28 @@ def go_to_tab(position):
 
 TAB_NAMES = [say("tab_scan"), say("tab_register"), say("tab_evidence")]
 
-# The language is part of the key as well as the counter. Switching
-# language renames every tab, and a strip whose remembered tab no longer
-# exists under its new name has to be built again.
+# The language is part of the key: switching it renames every tab, so
+# the strip has to be built again.
 TAB_KEY = ("nav_" + st.session_state["lang"]
            + "_" + str(st.session_state["tab_nonce"]))
 
-# Where the advisor actually is, read BEFORE the strip is built.
-#
-# The order matters and it is the whole of it. A click on a tab sets the
-# strip's own state and asks for a rerun; on that rerun the strip is
-# built again, and the tab it opens on is whatever is handed to default.
-# Read afterwards, the position would still be the one the advisor had
-# left a moment ago, the strip would open there, and the click would
-# appear to have done nothing - it took a second click to show. Read
-# first, default is already the tab that was just clicked.
-#
-# When the code moves the strip itself the key is new, so there is
-# nothing stored under it, nothing is read, and the position go_to_tab
-# set is the one that stands. The language switch is the same case: the
-# language is part of the key, so the new key is empty and the position
-# it saved under the old key, above, is the one used.
+# Where the advisor is, read BEFORE the strip is built. Read after, the
+# strip would open on the previous tab and a click would appear to do
+# nothing. When the code moves the strip the key is new and empty, so
+# the position set by go_to_tab is the one used.
 showing = st.session_state.get(TAB_KEY)
 if showing in TAB_NAMES:
     st.session_state["which_tab"] = TAB_NAMES.index(showing)
 
-# on_change="rerun" is what makes the strip tell the program which tab
-# was chosen. Left alone, a tab click is handled entirely in the browser
-# and never reaches here, so the program has no way of knowing where the
-# advisor is - and the next time the strip is rebuilt it would put them
-# back wherever the code last left them.
+# on_change="rerun" makes the strip report which tab was chosen.
+# Without it a click is handled in the browser and never reaches here.
 tab_scan, tab_register, tab_evidence = st.tabs(
     TAB_NAMES, default=TAB_NAMES[st.session_state["which_tab"]],
     key=TAB_KEY, on_change="rerun")
 
 # ---------------------------------------------------------------
 with tab_scan:
-    # Where the cohort comes from. One control, and what each source is
-    # and whether it is open to us is written under its own option rather
-    # than in a second place that would have to be kept in step.
+    # Where the cohort comes from. Each option says what it is underneath.
     source = st.radio(
         say("source"), [say("src_file"), say("src_db")],
         captions=[say("src_file_sub") + " · " + say("ready"),
@@ -1294,26 +1116,19 @@ with tab_scan:
         st.info(say("db_closed"))
 
     else:
-        # The key is fixed and the label is not part of it. Without one,
-        # changing language changed the uploader's label, Streamlit took
-        # it for a different widget, and the file the advisor had just
-        # scanned disappeared along with the result on screen.
+        # The key is fixed and the label is not part of it: a label that changes
+        # with the language would be taken for a different widget.
         handed = st.file_uploader(say("upload"), type=["csv"],
                                   key="cohort_upload")
 
-        # Streamlit's uploader takes a dropped file as well as a chosen one,
-        # but says so only in English and only on the button. This line says
-        # it in the language the rest of the screen is in.
+        # The uploader accepts a dropped file but says so in English only.
         st.caption(say("drag"))
 
         if handed is None:
             st.caption(say("no_file"))
         else:
-            # A cohort file saved out of Arabic Excel is often not written
-            # in UTF-8, and reading it blindly throws an error about bytes
-            # that tells the advisor nothing. The two encodings a Windows
-            # machine is likely to produce are tried as well, and a file in
-            # none of them is refused politely.
+            # A cohort file saved from Arabic Excel is often not UTF-8, so the two
+            # likely Windows encodings are tried as well.
             raw = handed.getvalue()
             contents = None
             for encoding in ["utf-8", "utf-8-sig", "cp1256"]:
@@ -1327,28 +1142,20 @@ with tab_scan:
                 st.error(say("bad_encoding"))
                 contents = ""
 
-            # Kept so the file can be stored exactly as it arrived and so
-            # the same text is used to recognise it again later.
+            # Kept so the file can be stored and recognised again later.
             st.session_state["file_text"] = contents
 
-            # A different file than last time clears the screen straight
-            # away. Otherwise the name at the top would say one file while
-            # the register underneath still showed another one's students.
+            # A different file clears the screen, so the name and the register agree.
             if st.session_state["file_now"] != handed.name + contents[:200]:
                 st.session_state["file_now"] = handed.name + contents[:200]
                 st.session_state["found"] = None
                 st.session_state["sent"] = database.notices_already_sent()
-                # The result opened from the database has to go as well.
-                # Without this the register kept showing the students of an
-                # older cohort while the scan screen named the new file, so
-                # the two screens described two different cohorts at once.
+                # The result opened from the database is cleared too.
                 st.session_state["stored"] = None
                 st.session_state["stored_when"] = ""
 
-            # Decoding into letters is not the same as the letters making a
-            # table. A file in the wrong format, or one that is not a cohort
-            # file at all, fails here rather than at the decode, so the
-            # reading is guarded too and the same plain message is shown.
+            # Decoding is not the same as parsing. A file that is not a cohort file
+            # fails here, so the reading is guarded too.
             table = None
             missing_keys = []
             if contents != "":
@@ -1361,12 +1168,8 @@ with tab_scan:
                     st.error(say("empty_file"))
                     table = None
 
-            # A file missing one of the columns the scan is built on is
-            # stopped here and named here, before anything else. There is
-            # no student to put in the register without a student number,
-            # and no record to read without the column that says what each
-            # row is. The advisor is told which column is absent, because a
-            # screen that does nothing and says nothing cannot be acted on.
+            # A file missing a key column is stopped here and the column is named,
+            # because a screen that does nothing and says nothing cannot be acted on.
             if missing_keys:
                 rows = ('<div class="gaphead">' + say("gap_no_keys")
                         + '</div><div class="gaplist">'
@@ -1377,17 +1180,11 @@ with tab_scan:
                 st.markdown('<div class="box stopped">' + rows + '</div>',
                             unsafe_allow_html=True)
 
-            # A file that could not be read stops the scan, and nothing
-            # more. The rest of the screen, including the shelf of files
-            # scanned before, stays where it is: losing the whole page
-            # because one upload was the wrong format helps nobody.
+            # A file that could not be read stops the scan, and nothing else.
             if table is not None:
                 carried = len(INDICATORS) - len(missing)
 
-                # Is this file already here? The answer comes from its
-                # contents, not its name, and from the same text that
-                # gets stored - so an uploaded file matches what was
-                # saved from it rather than never matching at all.
+                # Is this file already stored? Matched on contents, not on name.
                 kept = st.session_state.get("file_text", "")
                 already = database.find_file(kept)
                 newer_than = database.other_versions(handed.name, kept)
@@ -1399,20 +1196,9 @@ with tab_scan:
                 elif len(newer_than) > 0:
                     st.warning(say("file_updated", n=len(newer_than)))
 
-                # Whether the file is short of anything, said once and
-                # only when it is. A file that supplies all six says
-                # nothing here: there is nothing to warn about, and a
-                # count on a healthy file reads as though the system
-                # discovers indicators in whatever it is handed, which it
-                # does not. It knows six, and looks for those six.
-                #
-                # A file that was read but yields no indicator at all is
-                # not put to the model. Handed a row of empty cells the
-                # model answers from the pattern it learned and nothing
-                # else, returning the same number for every student in the
-                # file, which would flag or clear a whole cohort for no
-                # stated reason. A file missing a column the scan needs was
-                # stopped and named above, before this point.
+                # Said once, and only when the file is short of something. A file that
+                # yields no indicator at all is not sent to the model, because it would
+                # return the same probability for every student.
                 stop = carried == 0
 
                 if stop:
@@ -1433,9 +1219,7 @@ with tab_scan:
                     st.markdown('<div class="box warn">' + rows + '</div>',
                                 unsafe_allow_html=True)
 
-                # Text where a number belongs is a separate complaint: the
-                # column is there and was read, but some of its cells
-                # could not be made into numbers.
+                # Text where a number belongs: the column was read but some cells were not.
                 if len(unreadable) > 0:
                     rows = ('<div class="gaphead">' + say("gap_text")
                             + '</div><div class="gaplist">'
@@ -1447,25 +1231,19 @@ with tab_scan:
                     st.markdown('<div class="box warn">' + rows + '</div>',
                                 unsafe_allow_html=True)
 
-                # A file the system already holds can be scanned again,
-                # but the button says so and the line underneath says what
-                # happens to the first scan. An advisor pressing a button
-                # marked "scan" on a file already scanned has no way of
-                # knowing whether the earlier one is about to be lost.
+                # A stored file can be scanned again, and the caption says what happens
+                # to the first scan.
                 if already is not None and not stop:
                     st.caption(say("run_again_note"))
                 button_says = say("run_again") if already is not None \
                     else say("run")
 
-                # The button stays where it is and goes dim. Taking it off
-                # the screen would read as the page having broken.
+                # The button stays on screen and goes dim rather than disappearing.
                 if st.button(button_says, type="primary", disabled=stop):
                     with st.spinner(say("scanning")):
                         found = scan(table, box, carried)
                         st.session_state["found"] = found
-                        # Kept for the facts line: which file, scanned
-                        # when. Read from here rather than worked out
-                        # again, so the screen says what actually ran.
+                        # Kept for the facts line: which file, and when it was scanned.
                         st.session_state["file_now_name"] = handed.name
                         st.session_state["ran_on"] = \
                             datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -1477,9 +1255,7 @@ with tab_scan:
     if found is not None:
         people = found.groupby("id_student")["flagged"].any()
 
-        # The three stages of a scan. What the system does inside each
-        # one is its own business, and naming those steps on screen tells
-        # an advisor nothing they can act on.
+        # The three stages of a scan, as the advisor sees them.
         steps = ""
         for number, key in enumerate(["step1", "step2_", "step3_"],
                                      start=1):
@@ -1492,15 +1268,8 @@ with tab_scan:
         flagged_count = int(people.sum())
         share = (flagged_count / len(people) * 100) if len(people) else 0
 
-        # Three tiles. The middle one is a button and the other two are
-        # drawn, because it is the only one worth opening: a student with
-        # nothing against them has no record to read, and a total leads
-        # to the same place the flagged count does.
-        #
-        # They sit in columns rather than in one drawn row, because a
-        # Streamlit button cannot live inside markup we wrote ourselves.
-        # The order is reversed in Arabic so the count of students stays
-        # on the right, where the reading starts.
+        # Three tiles. The middle one is a button, the other two are drawn.
+        # The order is reversed in Arabic so the count stays on the right.
         order = [0, 1, 2] if st.session_state["lang"] != "ar" else [2, 1, 0]
         boxes = st.columns(3)
 
@@ -1521,9 +1290,7 @@ with tab_scan:
             st.markdown(tile(int((~people).sum()), say("clear"), "g",
                              under="&nbsp;"), unsafe_allow_html=True)
 
-        # What this scan was, in four plain lines. Not a log: an advisor
-        # reading this screen wants to know which file, cut where, at what
-        # threshold - not the order the work was done in.
+        # What this scan was: which file, cut where, at what threshold.
         facts = [
             (say("f_file"), st.session_state.get("file_now_name", "")
              + " · " + st.session_state.get("ran_on", "")),
@@ -1539,8 +1306,7 @@ with tab_scan:
         st.markdown('<div class="box">' + rows + '</div>',
                     unsafe_allow_html=True)
 
-    # Everything scanned so far, so any earlier cohort can be opened again
-    # or put through the system a second time.
+    # Everything scanned so far, so an earlier cohort can be opened again.
     st.divider()
     st.subheader(say("stored"))
 
@@ -1582,10 +1348,7 @@ with tab_scan:
                     st.session_state["found"] = found
                     st.session_state["file_now_name"] = str(
                         run["file_name"])
-                    # This is a new scan and it is stored as one, so the
-                    # screen carries the moment it ran. Reading the date off
-                    # the run it was opened from would put the older scan
-                    # time on a result produced now.
+                    # A new scan carries the time it ran, not the time of the run it opened.
                     st.session_state["ran_on"] = \
                         datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
                     st.session_state["stored"] = None
@@ -1599,9 +1362,7 @@ with tab_register:
     stored = st.session_state["stored"]
 
     if found is None and stored is not None:
-        # A result opened from the database. It is read back exactly as it
-        # was written, so there is no model here and nothing is worked out
-        # again: these are the sentences the system gave on the day.
+        # A result read back from the database, exactly as it was written.
         st.info(say("from_store",
                     when=plain_date(st.session_state["stored_when"])))
 
@@ -1609,16 +1370,12 @@ with tab_register:
             part = stored
             if len(part) == 0:
                 continue
-            # Sorted by the student number as a number. Sorting it as
-            # text put 1411627 before 141648 and left the committee
-            # looking at an order nobody could explain.
+            # Sorted by the student number as a number, not as text.
             part = part.copy()
             part["_n"] = pd.to_numeric(part["student_id"], errors="coerce")
             part = part.sort_values(["_n", "course_code"])
 
-            # The heading counts students and course records separately,
-            # because this table has one row per record while the heading
-            # above it counts students.
+            # The heading counts students and course records separately.
             st.markdown('<div class="blockhead">' + heading
                         + ' <span class="sm">· '
                         + count_students(part["student_id"].nunique())
@@ -1626,10 +1383,7 @@ with tab_register:
                         + '</span></div>',
                         unsafe_allow_html=True)
 
-            # A probability is written to two places so a column of them
-            # can be read down at a glance, and a row stored before the
-            # column existed shows an empty cell rather than the word
-            # None.
+            # A probability is written to two places; a missing one shows empty.
             chance = []
             for v in part["probability"].values:
                 chance.append("" if pd.isna(v) else format(float(v), ".2f"))
@@ -1646,12 +1400,10 @@ with tab_register:
     elif found is None:
         st.caption(say("no_file"))
     else:
-        # One list. Every student on it was flagged the same way, by the
-        # model, so there is nothing to sort them into.
+        # One list: every student on it was flagged the same way.
         flagged_people = found[found["flagged"]]["id_student"].unique()
 
-        # A search box. With a hundred and fifty students on the register,
-        # an advisor looking for one of them needs it.
+        # A search box, for a register of a hundred and fifty students.
         looking_for = st.text_input(say("search"), "",
                                     label_visibility="collapsed",
                                     placeholder=say("search"))
@@ -1671,19 +1423,11 @@ with tab_register:
             chosen = st.dataframe(
                 table, hide_index=True, width="stretch",
                 on_select="rerun", selection_mode="single-row",
-                # The search text is part of the key on purpose. Changing
-                # the search builds a fresh table with nothing selected,
-                # instead of carrying the old row's position over to a
-                # different list of students.
+                # The search text is part of the key, so a new search starts unselected.
                 key="reg_" + looking_for.strip())
 
-            # Streamlit hands back the position of the chosen row, and that
-            # position belongs to the table as it was drawn. Typing in the
-            # search box redraws a shorter table while the old position is
-            # still remembered, so the position is checked against the list
-            # it is about to be used on. Without this check a search could
-            # throw an error onto the screen, or quietly open a different
-            # student than the one whose row was clicked.
+            # The returned row position belongs to the table as drawn, so it is
+            # checked against the current list before being used.
             rows_picked = chosen["selection"]["rows"]
             if len(rows_picked) > 0 and rows_picked[0] < len(shown):
                 picked = shown[rows_picked[0]]
@@ -1693,9 +1437,7 @@ with tab_register:
                        for w in flagged_people):
                 st.caption(say("nobody"))
 
-        # A cohort where nobody is flagged would otherwise leave this part
-        # of the screen blank, which reads as a system that did not run
-        # rather than one that ran and found nothing.
+        # A cohort with nobody flagged would otherwise leave this part blank.
         if len(flagged_people) == 0:
             st.info(say("all_clear"))
         else:
@@ -1715,10 +1457,7 @@ with tab_register:
                 if not row["flagged"]:
                     continue
 
-                # The threshold is given beside the probability. A number
-                # on its own invites the question "compared to what", and
-                # the answer is the only thing that makes the number mean
-                # anything.
+                # The threshold is given beside the probability.
                 inside = ('<p class="why">' + say("prob") + ": <b>"
                           + format(float(row["probability"]), ".2f")
                           + "</b> " + say("against_threshold",
@@ -1726,10 +1465,7 @@ with tab_register:
                                                    ".2f"))
                           + "</p>")
                 pushes = model_reasons(row, box)
-                # Three numbers in a row mean nothing without saying what
-                # each column is. A share of 23.9 per cent beside a value
-                # of 63.5 per cent needs a word on the card to tell the
-                # two apart.
+                # Each column is named, so a share and a value are not confused.
                 if len(pushes) > 0:
                     inside = inside + (
                         '<div class="push hd"><span>'
@@ -1743,8 +1479,7 @@ with tab_register:
                         '<span class="v">' + push["shown"] + '</span>'
                         '<span class="s">' + str(push["share"]) + '%</span>'
                         '</div>')
-                # And what they add up to, so nobody has to wonder what
-                # happened to the rest of the decision.
+                # And what the shares add up to.
                 carried = round(sum(x["share"] for x in pushes), 1)
                 inside = inside + ('<p class="note">'
                                    + say("push_note", n=len(pushes),
@@ -1786,10 +1521,8 @@ with tab_register:
 
 # ---------------------------------------------------------------
 with tab_evidence:
-    # The result files are written in English by the scripts that produce
-    # them, because that is the language of the report. On screen they are
-    # read by whoever is in the room, so the column names and the words
-    # inside the cells are both turned into the language being shown.
+    # The result files are written in English. Column names and cell values
+    # are both translated for the screen.
     HEADINGS = {
         "Split": ("كيف قُسِّمت البيانات", "Split"),
         "Threshold": ("الحد الفاصل", "Threshold"),
@@ -1851,17 +1584,12 @@ with tab_evidence:
     def dress(frame):
         """Put a result table into the language on screen."""
         out = frame.copy()
-        # An empty cell is left empty. Streamlit prints a missing number
-        # as the word None, which reads as a value rather than as the
-        # absence of one, and the absence is the thing being said. Only
-        # the columns that actually have a gap are rewritten, so the rest
-        # of the table stays numbers and stays lined up on the right.
+        # An empty cell is left empty. Streamlit prints a missing number as the
+        # word None. Only columns with a gap are rewritten.
         for name in out.columns:
             if out[name].isna().any():
                 out[name] = ["" if pd.isna(v) else v for v in out[name]]
-        # The threshold is written to two places on the student's card
-        # and in the scan log, so it is written the same way here. One
-        # number should not have two spellings inside one system.
+        # The threshold is written to two places, as it is everywhere else.
         if "Threshold" in out.columns:
             out["Threshold"] = [format(float(v), ".2f")
                                 for v in out["Threshold"]]
@@ -1884,16 +1612,10 @@ with tab_evidence:
                          height=height)
         return frame
 
-    # What these tables are, said before the first of them. Without this
-    # line a reader who has just scanned a cohort takes the numbers for
-    # the result of that scan, which is the one thing they are not.
+    # What these tables are, said before the first of them.
     st.info(say("ev_what"))
 
     # ---- 1. where the indicators came from
-    #
-    # This is first on the page on purpose. Every other number here rests
-    # on the six indicators, so the first thing a reader is owed is where
-    # those six came from - and the answer is a table, not a sentence.
     st.markdown("#### " + say("ev_chosen"))
     st.caption(say("ev_chosen_note"))
     chosen = show("results_indicator_check.csv", say("ev_chosen_table"))
@@ -1918,10 +1640,6 @@ with tab_evidence:
                         unsafe_allow_html=True)
 
     # ---- 2. and not one column about who the student is
-    #
-    # The strongest single claim the project makes, and the one a
-    # committee is most likely to test. It is stated here as a result of
-    # the experiment above, never as a position we took.
     st.divider()
     st.markdown("#### " + say("ev_identity"))
     st.caption(say("ev_identity_note"))
@@ -1943,9 +1661,8 @@ with tab_evidence:
     if weight is None:
         st.caption(say("ev_no_file"))
     else:
-        # The bar is drawn inside the table rather than beside it. The
-        # names are phrases, not labels, and a chart alongside clips them
-        # after a few letters; in the row, the name has a whole column.
+        # The bar is drawn inside the table, because a chart alongside clips
+        # the names.
         widest = float(weight["share_of_gain"].max())
         bars = ('<div class="push hd"><span>' + say("col_indicator")
                 + '</span><span class="s">' + say("col_share")
@@ -1974,9 +1691,8 @@ with tab_evidence:
     threshold = show("results_threshold_table.csv", say("ev_thresh"))
     if threshold is not None and "Recall" in threshold.columns:
         st.caption(say("chart_threshold"))
-        # A chart takes its legend from the column names, so the columns
-        # are renamed before it is drawn. Two English words in the corner
-        # of an Arabic screen are still two English words.
+        # The columns are renamed before the chart, which takes its legend
+        # from them.
         line = threshold.set_index("Threshold")[["Recall", "Precision"]]
         line.columns = [say("m_recall"), say("m_precision")]
         line.index.name = say("col_threshold")
@@ -1990,33 +1706,20 @@ with tab_evidence:
     if fair is not None and "Precision" in fair.columns:
         st.caption(say("ev_small"))
         st.caption(say("chart_fair"))
-        # Only the groups that were scored are drawn. A group left
-        # unmeasured has no bar, because a bar of zero would say we
-        # measured a recall of zero, which is not what the empty cell
-        # in the table above means.
+        # Only scored groups are drawn: a bar of zero would read as a measured
+        # recall of zero.
         drawn = fair.copy()
         for name in ["Recall", "Precision"]:
             drawn[name] = pd.to_numeric(drawn[name], errors="coerce")
         drawn = drawn.dropna(subset=["Recall", "Precision"])
-        # Each bar is named by its attribute as well as its group, because
-        # "True" and "F" on their own say nothing, and the two measures
-        # stand side by side rather than stacked: a recall and a precision
-        # added together make a number that means nothing.
+        # Each bar is named by attribute and group, and the two measures stand
+        # side by side rather than stacked.
         drawn[say("col_group")] = [
             group_words(str(a), str(g))
             for a, g in zip(drawn["Attribute"], drawn["Group"])]
-        # Laid on its side, so each group's name has a line of its own
-        # instead of being stood on its edge under a bar.
-        #
-        # The axis is pinned from nought to one, and it is drawn here
-        # rather than by the plain bar chart because that one has no way
-        # to pin it. Left to choose, it fits the axis to the bars and to
-        # the width it is given, and the same figures came out once on an
-        # axis of nought to one and once on an axis running from below
-        # nought to past one and a half. Both measures are proportions.
-        # Neither can be less than nothing or more than everything, and
-        # an axis that says otherwise invites the reader to compare two
-        # drawings of the same table and find them different.
+        # Laid on its side so each name has its own line, with the axis pinned
+        # from 0 to 1. Both measures are proportions, and the plain bar chart
+        # cannot pin an axis.
         tall = drawn.melt(id_vars=[say("col_group")],
                           value_vars=["Recall", "Precision"],
                           var_name="measure", value_name="value")
@@ -2039,9 +1742,6 @@ with tab_evidence:
             height=360)
 
     # ---- 7. the result
-    #
-    # Last, and last on purpose. Read first it is a number with nothing
-    # behind it; read here it is the outcome of everything above.
     st.divider()
     st.markdown("#### " + say("ev_test_head"))
     st.caption(say("ev_test_note"))

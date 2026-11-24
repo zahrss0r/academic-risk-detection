@@ -1,35 +1,20 @@
 # database.py
 #
-# Where everything the system has scanned is kept.
+# Stores everything the system has scanned, in one SQLite file
+# (predictions.db) beside the code.
 #
-# One SQLite file, predictions.db, sitting next to the code. SQLite needs
-# no server and no installation: it is one file, and sqlite3 comes with
-# Python, so the project gains a database without gaining a dependency.
+# Five tables:
+#   cohort_file  every uploaded file, with a fingerprint of its contents
+#   scan_run     every scan of a file; one file can be scanned more than once
+#   scan_result  every flagged student in a run, with the reason given
+#   notice       the students sent to an advisor
+#   student      the few details about a student that do not change in a term
 #
-# FIVE TABLES, AND WHY EACH ONE EXISTS
+# Stored: the university number, the course code, the date, the reason, and
+# the uploaded file as it arrived.
 #
-#   cohort_file  every file that was ever uploaded, contents and all, with
-#                a fingerprint of those contents so the same file can be
-#                recognised if it arrives again
-#   scan_run     every time a file was scanned. One file can be scanned
-#                more than once, so this is separate from the file itself
-#   scan_result  every student the system flagged in a run, with the reason
-#                it gave. This is what lets an old scan be opened again and
-#                read exactly as it was, without running it a second time
-#   notice       the students the committee actually sent to an advisor
-#   student      the few things about a student that do not change in a term
-#
-# WHAT IS STORED, AND WHAT IS NOT.
-#
-# Stored: the university number, the course code, the date, the reason the
-# system gave, and the uploaded file as it arrived.
-#
-# Not stored, ever: names, national identity numbers, phone numbers, email
-# addresses, or anything else that identifies a person outside the
-# university's own records.
-#
-# The privacy requirement in Chapter 4 describes exactly the tables below.
-#
+# Never stored: names, national identity numbers, phone numbers, email
+# addresses, or anything else identifying a person.
 import hashlib
 import sqlite3
 import pandas as pd
@@ -46,14 +31,11 @@ def connect():
 
 
 def create_tables():
-    # Called once when the application starts. "IF NOT EXISTS" means
-    # running it again on an existing file changes nothing.
+    # Called once at startup. "IF NOT EXISTS" makes a second run harmless.
     connection = connect()
     cursor = connection.cursor()
 
-    # One row per student the system has ever read, and only what a cohort
-    # file actually carries about them. A table is either filled by the
-    # system that owns it, or it does not belong in it.
+    # One row per student, holding only what a cohort file carries about them.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS student (
             student_id TEXT PRIMARY KEY,
@@ -61,12 +43,8 @@ def create_tables():
         )
     """)
 
-    # Every file that was ever uploaded, kept whole.
-    #
-    # fingerprint is worked out from the contents, not the name. Two files
-    # with the same name but one changed mark have different fingerprints,
-    # and that is exactly the case we have to tell apart: the same file
-    # arriving again is not a new cohort, but an updated file is.
+    # Every uploaded file, kept whole. The fingerprint is taken from the
+    # contents, so a renamed file still matches and an edited one does not.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS cohort_file (
             file_id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,8 +57,8 @@ def create_tables():
         )
     """)
 
-    # One row every time a file is scanned. A file can be scanned again
-    # later, which is why this is not part of the file's own row.
+    # One row per scan. A file can be scanned again, so this is separate
+    # from the file's own row.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS scan_run (
             run_id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,9 +74,8 @@ def create_tables():
         )
     """)
 
-    # Every student a run flagged, with the reason that run gave. Writing
-    # the reason down rather than working it out again later means an old
-    # scan reads exactly as it read on the day, even if the model changes.
+    # Every flagged student in a run, with the reason stored as given, so an
+    # old scan reads as it did even if the model changes.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS scan_result (
             result_id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -113,19 +90,12 @@ def create_tables():
         )
     """)
 
-    # Many rows per student, one for every notice the system issued. This is
-    # the one to many relationship in the entity relationship diagram.
+    # Many rows per student, one per notice issued.
     #
-    # The columns follow the system exactly:
-    #   probability      what the model gave this student, between 0 and 1
-    #   reason           the sentence the advisor was shown, computed from
-    #                    that student's own row and stored as it was shown
-    #   indicators_read  how many of the indicators carried a value, so a
-    #                    notice can be read later knowing how much of the
-    #                    picture the system actually had
-    #   state            'waiting' or 'sent'. There is no third state: the
-    #                    system notifies and stops, so what the advisor did
-    #                    afterwards is not stored here.
+    #   probability      what the model gave, between 0 and 1
+    #   reason           the sentence shown to the advisor
+    #   indicators_read  how many indicators carried a value
+    #   state            'waiting' or 'sent'. There is no third state.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS notice (
             notice_id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -146,9 +116,7 @@ def create_tables():
 
 
 def save_student(student_id, first_seen):
-    # Adds the student if new and leaves the first date alone if not.
-    # "INSERT OR IGNORE" does exactly that: a student already in the table
-    # keeps the day we first saw them, however many files they appear in.
+    # "INSERT OR IGNORE" keeps the first date for a student already stored.
     connection = connect()
     cursor = connection.cursor()
 
@@ -162,12 +130,10 @@ def save_student(student_id, first_seen):
 
 
 def fingerprint_of(contents):
-    """A short string worked out from the contents of a file.
+    """A short string taken from the contents of a file.
 
-    Change one character anywhere in the file and this comes out
-    completely different, so comparing two fingerprints is a fair way of
-    asking "is this the same file?" without comparing the files themselves
-    character by character.
+    One changed character gives a completely different result, so two
+    fingerprints can be compared instead of two files.
     """
     return hashlib.sha256(contents.encode("utf-8")).hexdigest()
 
@@ -175,9 +141,7 @@ def fingerprint_of(contents):
 def find_file(contents):
     """Has this exact file been uploaded before? Returns its row or None.
 
-    The lookup is on the fingerprint, so a file that was renamed is still
-    recognised, and a file that kept its name but had a mark changed is
-    correctly treated as a different file.
+    Matched on the fingerprint, so a renamed file is still recognised.
     """
     connection = connect()
     found = pd.read_sql_query("""
@@ -193,11 +157,8 @@ def find_file(contents):
 
 
 def save_file(file_name, contents, rows_in_file, uploaded_on):
-    """Stores an uploaded file whole, and hands back its file_id.
-
-    If the same contents are already here, nothing is written twice and the
-    row that is already stored is the one returned.
-    """
+    """Store an uploaded file whole and return its file_id. Identical
+    contents are not written twice."""
     already = find_file(contents)
     if already is not None:
         return int(already["file_id"])
@@ -218,11 +179,7 @@ def save_file(file_name, contents, rows_in_file, uploaded_on):
 
 
 def other_versions(file_name, contents):
-    """Files stored under this name whose contents are different.
-
-    This is how the system can say "a file of this name is already here,
-    but what you have just uploaded is not the same file."
-    """
+    """Files stored under this name whose contents are different."""
     connection = connect()
     found = pd.read_sql_query("""
         SELECT file_id, uploaded_on, rows_in_file
@@ -253,11 +210,9 @@ def save_run(file_id, ran_on, day_of_term, threshold, students, records,
 
 
 def save_results(run_id, rows):
-    """Stores every flagged record of one run.
+    """Store every flagged record of one run.
 
-    rows is a list of dictionaries, one per flagged course record. They go
-    in together rather than one at a time because a scan produces a few
-    hundred of them and opening the database once is enough.
+    rows is a list of dictionaries, written together in one connection.
     """
     connection = connect()
     cursor = connection.cursor()
@@ -318,11 +273,9 @@ def get_file_contents(file_id):
 
 def save_notice(student_id, course_code, made_on, day_of_term,
                 reason, probability, indicators_read, state):
-    # Adds one notice. notice_id is filled in by the database.
-    #
-    # The values are passed as question marks rather than glued into the
-    # text of the query. That is the correct way to do it: a student number
-    # read from a file can never be read as part of the command.
+    # Adds one notice; notice_id is filled in by the database. Values are
+    # passed as parameters, so a student number can never be read as part
+    # of the command.
     connection = connect()
     cursor = connection.cursor()
 
