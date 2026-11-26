@@ -10,6 +10,7 @@ the cut day, builds the six indicators, and scores every student. An
 indicator with no data is left empty, not set to zero.
 """
 
+import base64
 import datetime
 import io
 
@@ -39,6 +40,12 @@ WORDS = {
     "code_module":          ("رمز المقرر", "course code"),
     "code_presentation":    ("الفصل الدراسي", "term"),
     "event_type":           ("نوع السجل", "kind of record"),
+    "date_due":             ("يوم استحقاق العمل", "day the work was due"),
+    "date_submitted":       ("يوم التسليم", "day it was handed in"),
+    "score":                ("الدرجة", "the mark"),
+    "weight":               ("وزن العمل", "weight of the work"),
+    "date":                 ("يوم الدخول", "day of the visit"),
+    "clicks":               ("عدد النقرات", "number of clicks"),
 }
 
 # Arabic names for the qualification values. A value not listed here is
@@ -155,11 +162,11 @@ TEXT = {
     "ev_identity":  ("ولا عمود عن هوية الطالب",
                      "Not one column about who the student is"),
     "ev_identity_note": ("هذه الأعمدة عُرضت على التجربة نفسها، ولم تختر "
-                         "أياً منها. لم نستبعدها — التجربة لم تجد فيها "
+                         "أياً منها. لم تُستبعد — التجربة لم تجد فيها "
                          "ما يضيف.",
                          "These columns were offered to the same "
-                         "experiment and it chose none of them. We did "
-                         "not exclude them; the experiment found nothing "
+                         "experiment and it chose none of them. They were "
+                         "not excluded; the experiment found nothing "
                          "in them to add."),
     "id_gender":    ("الجنس", "gender"),
     "id_region":    ("المنطقة", "region"),
@@ -203,8 +210,8 @@ TEXT = {
     "ev_no_file":   ("ملف النتائج غير موجود بجانب التطبيق",
                      "The result file is not beside the application"),
 
-    "ev_thresh":    ("كل حد فاصل جربناه — مجموعة التحقق، لأن عليها اختِير الحد",
-                     "Every threshold we tried — validation set, because that "
+    "ev_thresh":    ("كل حد فاصل جُرِّب — مجموعة التحقق، لأن عليها اختِير الحد",
+                     "Every threshold tried — validation set, because that "
                      "is where the threshold was chosen"),
     "ev_models":    ("الخوارزميات الأربع عند حد ٠٫٢٠ — مجموعة التحقق. "
                      "الأرقام هنا لا تقارن بالاختبار النهائي أدناه، لأنها "
@@ -227,10 +234,10 @@ TEXT = {
                      "value for it and none is assumed for them."),
     "ev_weight":    ("وزن كل مؤشر في القرار", "What each indicator carries"),
     "ev_small":     ("الفئة التي عدد طلابها أقل من خمسين تُعدّ ولا تُقاس: "
-                     "خليّة فارغة تعني أننا لم نقِسها، لا أنها صفر.",
+                     "خليّة فارغة تعني أنها لم تُقَس، لا أنها صفر.",
                      "A group of fewer than fifty students is counted but "
-                     "not scored: an empty cell means we did not measure "
-                     "it, not that it is zero."),
+                     "not scored: an empty cell means it was not measured, "
+                     "not that it is zero."),
     "lang":         ("English", "العربية"),
     "src_file_sub": ("ملف الدفعة بصيغة مفصولة بفواصل",
                      "A cohort file in comma separated form"),
@@ -349,12 +356,12 @@ TEXT = {
 
     # Captions for the three charts on the performance screen.
     "chart_threshold": ("كيف يتبادل الاستدعاء والدقة عند كل حد فاصل. "
-                        "اخترنا ٠٫٢٠ لأن الطالب المفقود يخسر فصلاً، "
+                        "اختِير ٠٫٢٠ لأن الطالب المفقود يخسر فصلاً، "
                         "والإنذار الكاذب يكلّف مكالمة، وما يُفعل بالإنذار "
                         "قرار المرشد لا قرار النظام.",
                         "How recall and precision trade off at each "
-                        "threshold. We chose 0.20 because a student we "
-                        "miss loses a term, and a false alarm costs a "
+                        "threshold. 0.20 was chosen because a missed "
+                        "student loses a term, and a false alarm costs a "
                         "phone call."),
     "chart_fair":      ("الاستدعاء والدقة لكل فئة. الفجوة في الدقة بين "
                         "الإناث والذكور معروضة كما خرجت، ولم تُخفَ.",
@@ -431,18 +438,20 @@ STYLE = """
   --orange:#b45309; --orange-l:#fff4e8;
   --font:"IBM Plex Sans Arabic","Segoe UI",system-ui,sans-serif;
 }
-/* The font is set here and left to be inherited. It is deliberately NOT
-   forced onto every element: Streamlit draws its small icons with a font
-   where a word like "upload" is a picture rather than letters, so an
-   element that sets its own font has to be allowed to keep it. Forcing
-   ours everywhere printed the word "upload" beside the button. */
+/* The font is inherited rather than forced: Streamlit's icon font has to
+   stay on the elements that set it. */
 html, body, .stApp { font-family: var(--font); }
 button, input, select, textarea { font-family: var(--font); }
 .stApp [data-testid="stIconMaterial"]{font-family:'Material Symbols Rounded'!important}
 .stApp { background: var(--band); color: var(--ink); }
 .block-container { padding-top: 1.2rem; max-width: 1280px; }
 #MainMenu, footer, header { visibility: hidden; }
-/* the band across the top, the same one the simulation opens with */
+/* Text colour is pinned so the page does not follow the visitor's dark mode. */
+.stApp [data-testid="stTab"], .stApp [data-testid="stWidgetLabel"] p,
+.stApp [data-testid="stRadioOption"], .stApp [data-testid="stCaptionContainer"],
+.stApp [data-testid="stFileUploaderDropzone"] *{color:var(--ink)}
+.stApp [data-testid="stFileUploaderDropzone"]{background:var(--paper)}
+/* the band across the top */
 .hero{background:var(--green-d);color:#fff;border-radius:14px;padding:34px 26px;
       text-align:center;position:relative;overflow:hidden;margin-bottom:22px}
 .hero:after{content:"";position:absolute;inset-inline-start:-110px;top:-170px;
@@ -458,31 +467,11 @@ button, input, select, textarea { font-family: var(--font); }
 .tile{background:var(--paper);border:1px solid var(--line);border-radius:12px;
       padding:22px 16px;text-align:center;min-width:0;height:100%;
       display:flex;flex-direction:column;justify-content:center}
-/* The three boxes stand side by side and must be the same height. Each
-   has a slot for a second line under the label; the two that have
-   nothing to put there leave it empty rather than leaving it out, so
-   all three are built the same and line up without being measured. */
+/* the three tiles: equal height, with a slot for a second line */
 .tile .n{font-size:36px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
 .tile .t{font-size:14.5px;color:var(--ink-2);margin-top:8px}
 .tile.r .n{color:var(--red)} .tile.o .n{color:var(--orange)} .tile.g .n{color:var(--green)}
-/* The flagged tile is a real button, because a count of students is
-   only useful if the students are one click away - and a drawn box
-   cannot be clicked. It is a Streamlit button wearing the tile's
-   clothes: same border, same radius, same padding, the number in the
-   same size and the same orange.
-   It is reached by the key it was given. Wrapping it in markup of our
-   own does not work: Streamlit draws every element in its own box, so
-   an opening tag written before the button and a closing tag after it
-   end up as two empty boxes with the button between them, outside
-   both. The key is the one handle the page really has on it.
-   A button holds one line of text, so the three lines are made with
-   bold and italic and sized by what they are rather than by a class.
-   Its height is pinned to the drawn tiles beside it, because a button
-   and a div do not add up their padding the same way and three boxes
-   in a row that differ by a few pixels look like a mistake.
-   NOTE: no blank line may appear anywhere inside this stylesheet, not
-   even inside a comment. A blank line ends the block of HTML and the
-   rest of the sheet is printed onto the page as words. */
+/* the flagged tile: a Streamlit button styled as a tile */
 .st-key-to_register{width:100%}
 .st-key-to_register .stButton{display:block;width:100%}
 .st-key-to_register .stButton>button{width:100%!important;
@@ -508,7 +497,7 @@ button, input, select, textarea { font-family: var(--font); }
   background:var(--red-l)}
 .box .gaphead{font-weight:700;margin-bottom:6px}
 .box .gaplist{color:var(--ink-2);font-size:14px;line-height:1.95}
-/* the register, laid out the way the simulation lays it out */
+/* the register */
 .card{background:var(--paper);border:1px solid var(--line);border-radius:12px;
       overflow:hidden;margin-bottom:20px}
 .card .scroll{overflow-x:auto}
@@ -542,9 +531,7 @@ button, input, select, textarea { font-family: var(--font); }
 .push .v{font-variant-numeric:tabular-nums;color:var(--ink-2)}
 .push .s{font-weight:700;font-variant-numeric:tabular-nums;color:var(--orange)}
 .note{font-size:13px;color:var(--muted);line-height:1.7;margin-top:12px}
-/* one indicator and the share of the decision it carries, drawn here so
-   the bar is the same green as the rest of the system and the name has a
-   whole line to itself instead of being cut off on a chart's edge */
+/* one indicator and its share of the decision, with the name on its own line */
 .wrow{display:flex;align-items:center;gap:14px;padding:9px 0;
       border-bottom:1px solid var(--band);font-size:14px}
 .wrow:last-child{border-bottom:0}
@@ -554,15 +541,12 @@ button, input, select, textarea { font-family: var(--font); }
 .wrow .s{flex:0 0 72px;text-align:end;font-weight:700;color:var(--green);
          font-variant-numeric:tabular-nums}
 /* the bar across the very top, with the university's mark on it */
-/* The mark sits on the right in both languages. It is the university's
-   own artwork, not a piece of writing, so it does not change sides with
-   the text. Forcing the bar's direction is what keeps it there when the
-   rest of the screen turns around. */
+/* the mark stays on the right in both languages */
 .nav{background:var(--paper);border:1px solid var(--line);border-radius:12px;
      padding:12px 18px;display:flex;align-items:center;margin-bottom:14px;
      direction:rtl}
 .nav .logo img{height:34px;width:auto;display:block}
-/* the five steps of the scan */
+/* the steps of the scan */
 .steps{display:flex;background:var(--paper);border:1px solid var(--line);
        border-radius:12px;overflow:hidden;margin-bottom:16px;flex-wrap:wrap}
 .sp2{flex:1 1 160px;padding:13px 15px;display:flex;align-items:center;gap:10px;
@@ -574,7 +558,6 @@ button, input, select, textarea { font-family: var(--font); }
 .sp2.done .dot{background:var(--green);color:#fff}
 .sp2 .tx{font-size:13px;color:var(--muted);min-width:0}
 .sp2.done .tx{color:var(--ink);font-weight:600}
-/* the scan log */
 /* the breadcrumb on a student's page */
 .crumb{font-size:13px;color:var(--muted);margin-bottom:10px}
 .crumb b{color:var(--ink-2);font-weight:600}
@@ -586,11 +569,7 @@ button, input, select, textarea { font-family: var(--font); }
                  padding:11px 26px;font-size:15px;font-weight:600}
 .stButton button:hover{background:var(--green-d);color:#fff}
 .stButton button p{font-weight:600}
-/* Streamlit paints two small things in its own red: the bar under the
-   chosen tab, and the dot of the chosen radio button. Both are set to the
-   university's green here rather than in a settings file, so the whole
-   look of the system travels with app.py and nothing else has to be
-   copied beside it. */
+/* Streamlit's tab underline and radio dot, set to the project green. */
 .stApp .react-aria-SelectionIndicator{background:var(--green)!important}
 .stApp [data-testid="stRadioOption"]:has(input:checked) > div > div:first-child{
   background:var(--green)!important}
@@ -694,8 +673,6 @@ def value_shown(row, name):
     text = format(float(value), ".0f")
     return text + " " + unit(name) if unit(name) else text
 
-# The three columns that identify a record.
-KEY_COLUMNS = ["id_student", "code_module", "code_presentation"]
 
 
 def read_cohort(source):
@@ -705,8 +682,9 @@ def read_cohort(source):
     day, builds the six indicators, and leaves an indicator empty when the
     file gives nothing to build it from.
 
-    Returns the table, the indicators it could not build, and the identity
-    columns the file does not carry.
+    Returns four values: the table, the indicators it could not build, the
+    key columns the file does not carry, and the columns holding text where
+    a number belongs, with a count of such cells in each.
     """
     try:
         if isinstance(source, str):
@@ -724,12 +702,23 @@ def read_cohort(source):
     if missing_keys:
         return None, [], missing_keys, {}
 
+    # Text where a number belongs. The cell is counted before the
+    # derivation reads it, because the derivation sees only a gap.
+    unreadable = {}
+    for name in settings.NUMBER_COLUMNS:
+        if name in events.columns and events[name].dtype == object:
+            bad = int((events[name].notna()
+                       & pd.to_numeric(events[name],
+                                       errors="coerce").isna()).sum())
+            if bad:
+                unreadable[name] = bad
+
     table = build.from_events(events)
     table["rows_in_file"] = len(events)
 
     missing = [name for name in INDICATORS
                if name not in table.columns or table[name].isna().all()]
-    return table, missing, [], {}
+    return table, missing, [], unreadable
 
 
 def tile(number, label, colour, under=""):
@@ -793,7 +782,7 @@ def scan(table, box, carried):
             found, education_levels=box["education_levels"])
         found["probability"] = box["model"].predict_proba(frame)[:, 1]
 
-    found["flagged"] = found["probability"] >= settings.ALERT_THRESHOLD
+    found["flagged"] = settings.flags(found["probability"])
 
     # how much of the picture each record actually carried
     counts = []
@@ -968,21 +957,15 @@ if st.session_state["lang"] == "ar":
         .stApp li, .stApp .stMarkdown, .stApp .stCaption {
             direction: rtl; text-align: right;
         }
-        /* The tab strip, the buttons and the radio rows are laid out by
-           Streamlit from the left. In Arabic they belong on the right,
-           with the first tab under the start of the heading above it. */
+        /* RTL: the tab strip, buttons and radio rows start from the right. */
         .stApp .stTabs div:has(> [data-testid="stTab"]){
             flex-direction:row-reverse}
         .stApp .stTabs [data-testid="stTab"]{direction:rtl}
-        /* A radio laid out across the screen starts from the left; in
-           Arabic it starts from the right. One laid out down the screen
-           is already in order and only its dots move to the right side. */
+        /* RTL: a horizontal radio starts from the right. */
         .stApp [data-testid="stRadioGroup"][role="radiogroup"]:not(
             [data-baseweb="radio-group"]){flex-direction:row-reverse}
         .stApp [data-testid="stRadioOption"]{flex-direction:row-reverse}
-        /* The radio is only as wide as its choices, so left to itself it
-           sits against the left edge while everything around it starts
-           from the right. Pushed over to begin where the rest begins. */
+        /* RTL: the radio is aligned with the surrounding content. */
         .stApp [data-testid="stElementContainer"]:has(
             > [data-testid="stRadio"]){align-self:flex-end}
         .stApp [data-testid="stRadio"] [data-testid="stWidgetLabel"] p{
@@ -991,10 +974,7 @@ if st.session_state["lang"] == "ar":
         .stApp [data-testid="stFileUploaderDropzone"]{flex-direction:row-reverse}
         .stApp [data-testid="stFileUploaderDropzone"] *{direction:rtl}
         .stApp [data-testid="stFileUploaderFile"]{direction:rtl}
-        /* Streamlit writes the uploader's own button and its size note in
-           English and gives no way to change them. An English word sitting
-           inside an Arabic line is the one thing this screen must not do,
-           so the English is hidden and the Arabic put in its place. */
+        /* The uploader's own English labels are replaced with Arabic. */
         .stApp [data-testid="stFileUploaderDropzone"]
             [data-testid="stMarkdownContainer"] p{font-size:0}
         .stApp [data-testid="stFileUploaderDropzone"]
@@ -1005,9 +985,7 @@ if st.session_state["lang"] == "ar":
         .stApp [data-testid="stFileUploaderDropzoneInstructions"]
             span::after{content:"حتى ٢٠٠ ميجابايت للملف · صيغة مفصولة "
                 "بفواصل";font-size:13px}
-        /* Streamlit floats a little toolbar over the top corner of every
-           table. In Arabic that corner is where the heading ends, so the
-           toolbar was sitting on top of the words. Pushed clear of them. */
+        /* RTL: the table toolbar is moved clear of the heading. */
         .stApp [data-testid="stElementToolbar"]{inset-inline-end:auto;
             inset-inline-start:0}
         .stApp [data-testid="stDataFrame"],
@@ -1023,9 +1001,9 @@ st.markdown(STYLE, unsafe_allow_html=True)
 @st.cache_data
 def logo_tag():
     """The university logo, read from file and placed into the page."""
-    import base64
     try:
-        raw = open(settings.project_file("university_logo.svg"), "rb").read()
+        with open(settings.project_file("university_logo.svg"), "rb") as handle:
+            raw = handle.read()
         encoded = base64.b64encode(raw).decode()
         return '<img src="data:image/svg+xml;base64,' + encoded + '" alt="">'
     except FileNotFoundError:
@@ -1138,7 +1116,8 @@ with tab_scan:
                 except UnicodeDecodeError:
                     continue
 
-            if contents is None:
+            readable = contents is not None
+            if not readable:
                 st.error(say("bad_encoding"))
                 contents = ""
 
@@ -1158,7 +1137,11 @@ with tab_scan:
             # fails here, so the reading is guarded too.
             table = None
             missing_keys = []
-            if contents != "":
+            if readable and contents.strip() == "":
+                # A file with nothing in it is named as empty rather than
+                # leaving the screen with no file, no error and no button.
+                st.error(say("empty_file"))
+            elif readable:
                 try:
                     table, missing, missing_keys, unreadable = read_cohort(
                         io.StringIO(contents))
@@ -1585,10 +1568,12 @@ with tab_evidence:
         """Put a result table into the language on screen."""
         out = frame.copy()
         # An empty cell is left empty. Streamlit prints a missing number as the
-        # word None. Only columns with a gap are rewritten.
+        # word None, so a column with a gap becomes text throughout; a column
+        # holding both numbers and blanks cannot be rendered.
         for name in out.columns:
             if out[name].isna().any():
-                out[name] = ["" if pd.isna(v) else v for v in out[name]]
+                out[name] = out[name].map(
+                    lambda v: "" if pd.isna(v) else str(v)).astype("string")
         # The threshold is written to two places, as it is everywhere else.
         if "Threshold" in out.columns:
             out["Threshold"] = [format(float(v), ".2f")

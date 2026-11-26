@@ -28,8 +28,8 @@ import settings
 KEYS = settings.KEY_COLUMNS
 CUT_DAY = settings.CUT_DAY
 
-# The kinds of page whose clicks are built. All sixteen were offered to
-# the selection; these two are the ones its forward path proposed.
+# The kinds of page whose clicks are built. Every kind the data carries
+# was offered to the selection; these two are the ones it proposed.
 PAGE_KINDS = ["homepage", "dualpane"]
 
 
@@ -44,6 +44,12 @@ def from_events(events, students=None, cut_day=CUT_DAY):
     Returns one row per student per course.
     """
     events = events.copy()
+
+    # A column the file does not carry is added empty, so the indicator built
+    # from it comes out empty rather than stopping the scan.
+    for name in settings.EVENT_COLUMNS:
+        if name != "event_type" and name not in events.columns:
+            events[name] = np.nan
 
     # ---- who is in this cohort
     #
@@ -92,7 +98,7 @@ def from_events(events, students=None, cut_day=CUT_DAY):
                      "late_days_mean"]:
             out[name] = np.nan
 
-    # ---- what he did on the platform
+    # ---- activity on the platform
     seen = events[events["event_type"] == settings.EVENT_ACTIVITY]
     if len(seen) and "date" in seen.columns:
         seen = seen.copy()
@@ -107,7 +113,7 @@ def from_events(events, students=None, cut_day=CUT_DAY):
             part = seen[seen["activity_type"] == kind]
             name = "clicks_" + kind
             if len(part):
-                made = (part.groupby(KEYS)["clicks"].sum()
+                made = (part.groupby(KEYS)["clicks"].sum(min_count=1)
                             .rename(name).reset_index())
                 out = out.merge(made, on=KEYS, how="left")
             else:

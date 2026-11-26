@@ -26,8 +26,11 @@ DATABASE_FILE = settings.project_file("predictions.db")
 
 
 def connect():
-    # Opens the database file, creating it the first time.
-    return sqlite3.connect(DATABASE_FILE)
+    # Opens the database file, creating it the first time. Foreign keys are
+    # turned on for the connection; SQLite ignores them otherwise.
+    connection = sqlite3.connect(DATABASE_FILE)
+    connection.execute("PRAGMA foreign_keys = ON")
+    return connection
 
 
 def create_tables():

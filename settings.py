@@ -33,13 +33,9 @@ def project_file(name):
 # Fixed so every run of every script gives the same answer.
 RANDOM_SEED = 42
 
-# The prediction moment: day 110 of the course run.
-#
-# Chosen from the courses themselves: at least two weighted pieces of
-# work have fallen due and at least two are still ahead. That leaves a
-# window of day 68 to 116 across the fourteen runs, and at day 110 about
-# 43 per cent of the coursework weight is visible. Nothing dated after
-# this day is used anywhere.
+# The prediction moment: day 110 of the course run. Chosen from the
+# courses themselves; the test and the window it leaves are in section 3.4
+# of the report. Nothing dated after this day is used anywhere.
 CUT_DAY = 110
 
 # Raise an alert above this probability.
@@ -50,48 +46,40 @@ CUT_DAY = 110
 # full table of eleven thresholds is in results_threshold_table.csv.
 #
 # A low threshold is also the fairer one. On the validation slice the
-# widest recall gap by region is 0.161 at 0.20 against 0.189 at 0.30.
+# widest recall gap by region is 0.1605 at 0.20 (results_fairness.csv).
 ALERT_THRESHOLD = 0.20
 
-# One threshold, and no bands above it.
+
+def flags(probability):
+    """Whether a probability is reported. Works on one value or a column."""
+    # The threshold belongs to the band above it, so a probability exactly
+    # at it is reported. Written once here and used wherever a student is
+    # flagged, so the rule cannot differ between the system and its tests.
+    return probability >= ALERT_THRESHOLD
+
 
 # The six indicators the model reads, in the order it expects them.
 #
-# Chosen by a forward-selection experiment over seventy-one candidates,
-# stopping at the last step that raised cross-validated ROC-AUC by 0.001
-# or more. The path kept eight:
-#       score_mean          0.8130   (+0.3130)
-#       weight_sum          0.8581   (+0.0451)
-#       visit_day_last      0.8679   (+0.0098)
-#       late_days_mean      0.8722   (+0.0044)
-#       clicks_homepage     0.8751   (+0.0029)
-#       highest_education   0.8773   (+0.0022)
-#       score_std           0.8783   (+0.0010)
-#       clicks_dualpane     0.8796   (+0.0013)
+# Selected from seventy-one candidates by forward selection, then
+# re-tested on the validation slice; the full path and the removal test
+# are in results_10_full_path.csv and results_indicator_check.csv.
 #
-# Each one was then re-tested on the validation slice, which the
-# selection never saw (check_indicators.py,
-# results_indicator_check.csv). score_std and clicks_dualpane each cost
-# 0.0005 there and were removed, which is why this list holds six.
-#
-# No column about who the student is was chosen: gender, region,
-# deprivation band, age band and disability were all offered and none
-# was kept. highest_education is academic background, not a personal
-# characteristic.
+# No column about who the student is was kept. highest_education is
+# academic background, not a personal characteristic.
 INDICATORS = [
-    "score_mean",         # the mean of his marks so far
-    "weight_sum",         # the weight of the work he has handed in
-    "visit_day_last",     # the day of his last visit to the platform
-    "late_days_mean",     # how late, on average, his work was
-    "clicks_homepage",    # his clicks on the course home page
-    "highest_education",  # the highest qualification he holds
+    "score_mean",         # the mean of the marks so far
+    "weight_sum",         # the weight of the work handed in
+    "visit_day_last",     # the day of the last visit to the platform
+    "late_days_mean",     # how late, on average, the work was
+    "clicks_homepage",    # clicks on the course home page
+    "highest_education",  # the highest qualification held
 ]
 
 # Kept in the processed files so the model can be audited, and never
-# given to it. At 0.20 on the test slice the widest recall gap is 0.026
-# by gender and 0.005 by age band, but 0.104 by region and 0.121 by
-# deprivation band. The model reads none of these columns: the
-# unevenness is in the study behaviour, which differs between regions.
+# given to it. At 0.20 on the validation slice the widest recall gap is
+# 0.0286 by gender and 0.0198 by age band, but 0.1605 by region and
+# 0.0958 by deprivation band (results_fairness.csv). The model reads
+# none of these columns: the unevenness is in the study behaviour.
 AUDIT_ONLY_COLUMNS = [
     "gender",
     "region",
@@ -127,6 +115,17 @@ EVENT_COLUMNS = [
     "activity_type",    # what kind of page            (activity)
     "date",             # the day of the visit         (activity)
     "clicks",           # how many clicks that day     (activity)
+]
+
+# The event columns that have to read as numbers. Text in one of these is
+# read as not known rather than as a zero, and the reader reports it.
+NUMBER_COLUMNS = [
+    "date_due",
+    "date_submitted",
+    "score",
+    "weight",
+    "date",
+    "clicks",
 ]
 
 # The three columns that say whose record a row is.
