@@ -449,14 +449,6 @@ STYLE = """
     --red:#ff8a80; --red-l:#3a1f1d;
     --orange:#f0a35e; --orange-l:#3a2a18;
   }
-  /* The green is readable as a fill on white but not as text on a dark
-     surface, so where it carries words or a thin bar it steps up. */
-  .stTabs [aria-selected="true"]{color:var(--green-br)!important}
-  .wrow .fill{background:var(--green-br)}
-  .wrow .s{color:var(--green-br)}
-  /* The university's mark is artwork drawn for a white ground and is not
-     ours to recolour, so the bar it sits on keeps its own background. */
-  .nav{background:#fff;border-color:#e5e7eb}
 }
 /* The font is inherited rather than forced: Streamlit's icon font has to
    stay on the elements that set it. */
@@ -603,6 +595,23 @@ button, input, select, textarea { font-family: var(--font); }
 .stApp .react-aria-SelectionIndicator{background:var(--green)!important}
 .stApp [data-testid="stRadioOption"]:has(input:checked) > div > div:first-child{
   background:var(--green)!important}
+/* The hero line is centred on the band. A rule that names the heading
+   itself is needed: the centring on the band is inherited, and an
+   inherited value never wins against one aimed at the element. */
+.stApp .hero h1{text-align:center}
+/* These sit at the end because a rule only overrides what comes before
+   it. The palette above is set on :root and reaches every rule by name;
+   these four name elements, so they have to follow those elements. */
+@media (prefers-color-scheme: dark){
+  /* The green reads as a fill on white but not as words on a dark
+     surface, so where it carries text or a thin bar it steps up. */
+  .stTabs [aria-selected="true"]{color:var(--green-br)!important}
+  .wrow .fill{background:var(--green-br)}
+  .wrow .s{color:var(--green-br)}
+  /* The university's mark is artwork drawn for a white ground and is not
+     ours to recolour, so the bar it sits on keeps its own. */
+  .nav{background:#fff;border-color:#e5e7eb}
+}
 </style>
 """
 
