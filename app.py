@@ -438,6 +438,26 @@ STYLE = """
   --orange:#b45309; --orange-l:#fff4e8;
   --font:"IBM Plex Sans Arabic","Segoe UI",system-ui,sans-serif;
 }
+/* The same palette in dark. Only the surfaces and the text change: the
+   university green is the brand and stays as it is. Every rule below
+   reads these names, so nothing else has to be written twice. */
+@media (prefers-color-scheme: dark){
+  :root{
+    --ink:#e8eaed; --ink-2:#c2c8cf; --muted:#9aa1a9;
+    --paper:#1b1f24; --band:#121417; --line:#2e343c;
+    --green-l:#15362a;
+    --red:#ff8a80; --red-l:#3a1f1d;
+    --orange:#f0a35e; --orange-l:#3a2a18;
+  }
+  /* The green is readable as a fill on white but not as text on a dark
+     surface, so where it carries words or a thin bar it steps up. */
+  .stTabs [aria-selected="true"]{color:var(--green-br)!important}
+  .wrow .fill{background:var(--green-br)}
+  .wrow .s{color:var(--green-br)}
+  /* The university's mark is artwork drawn for a white ground and is not
+     ours to recolour, so the bar it sits on keeps its own background. */
+  .nav{background:#fff;border-color:#e5e7eb}
+}
 /* The font is inherited rather than forced: Streamlit's icon font has to
    stay on the elements that set it. */
 html, body, .stApp { font-family: var(--font); }
@@ -446,11 +466,21 @@ button, input, select, textarea { font-family: var(--font); }
 .stApp { background: var(--band); color: var(--ink); }
 .block-container { padding-top: 1.2rem; max-width: 1280px; }
 #MainMenu, footer, header { visibility: hidden; }
-/* Text colour is pinned so the page does not follow the visitor's dark mode. */
+/* Streamlit's own widgets are brought onto the palette above, so they
+   read the same in either mode. The uploader's button is named on its
+   own: a blanket rule would colour its label and leave its background to
+   Streamlit, which is how a button ends up dark text on dark. */
 .stApp [data-testid="stTab"], .stApp [data-testid="stWidgetLabel"] p,
 .stApp [data-testid="stRadioOption"], .stApp [data-testid="stCaptionContainer"],
-.stApp [data-testid="stFileUploaderDropzone"] *{color:var(--ink)}
+.stApp [data-testid="stFileUploaderDropzoneInstructions"],
+.stApp [data-testid="stFileUploaderDropzoneInstructions"] *{color:var(--ink)}
 .stApp [data-testid="stFileUploaderDropzone"]{background:var(--paper)}
+.stApp [data-testid="stFileUploaderDropzone"] button{
+  background:var(--green)!important;color:#fff!important;border:0;
+  border-radius:8px;font-weight:600}
+.stApp [data-testid="stFileUploaderDropzone"] button *{color:#fff!important}
+.stApp [data-testid="stFileUploaderDropzone"] button:hover{
+  background:var(--green-d)!important}
 /* the band across the top */
 .hero{background:var(--green-d);color:#fff;border-radius:14px;padding:34px 26px;
       text-align:center;position:relative;overflow:hidden;margin-bottom:22px}
@@ -479,8 +509,8 @@ button, input, select, textarea { font-family: var(--font); }
   border:1px solid var(--line);border-radius:12px;padding:22px 16px;
   text-align:center;box-shadow:none;transition:border-color .15s,
   box-shadow .15s}
-.st-key-to_register .stButton>button:hover{border-color:var(--orange);
-  box-shadow:0 2px 10px rgba(180,83,9,.12)}
+.st-key-to_register .stButton>button:hover{background:var(--paper);
+  border-color:var(--orange);box-shadow:0 2px 10px rgba(180,83,9,.12)}
 .st-key-to_register .stButton>button:focus{box-shadow:none;
   border-color:var(--orange)}
 .st-key-to_register .stButton>button p{margin:0;line-height:1.35;
@@ -489,7 +519,7 @@ button, input, select, textarea { font-family: var(--font); }
   font-size:36px;font-weight:700;line-height:1;color:var(--orange);
   font-variant-numeric:tabular-nums;margin-bottom:8px}
 .st-key-to_register .stButton>button p em{display:block;
-  font-style:normal;font-size:12px;color:var(--muted);margin-top:4px}
+  font-style:normal;font-size:13px;color:var(--ink-2);margin-top:4px}
 .tile .u{font-size:12px;color:var(--muted);margin-top:4px}
 .box.warn{border-inline-start:3px solid var(--orange);
   background:var(--orange-l)}
